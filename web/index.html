@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="Jay Pharma Collection & Payment System">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Jay Pharma">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Jay Pharma - Collection System</title>
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #070C1A;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    #loading-splash {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: radial-gradient(circle at 50% 30%, #0F1E40 0%, #070C1A 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 999999;
+      transition: opacity 0.4s ease-out, visibility 0.4s ease-out;
+    }
+
+    .splash-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px;
+      text-align: center;
+    }
+
+    .logo-container {
+      width: 80px;
+      height: 80px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%);
+      box-shadow: 0 10px 30px rgba(2, 132, 199, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      animation: pulse-glow 2s infinite ease-in-out;
+    }
+
+    .logo-container svg {
+      width: 44px;
+      height: 44px;
+      fill: #FFFFFF;
+    }
+
+    .brand-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: #FFFFFF;
+      letter-spacing: -0.5px;
+      margin-bottom: 4px;
+    }
+
+    .brand-subtitle {
+      font-size: 13px;
+      font-weight: 500;
+      color: #94A3B8;
+      margin-bottom: 28px;
+    }
+
+    .loader-bar-bg {
+      width: 180px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 99px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .loader-bar-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 50%;
+      background: linear-gradient(90deg, #38BDF8, #818CF8);
+      border-radius: 99px;
+      animation: indeterminate-progress 1.5s infinite ease-in-out;
+    }
+
+    .loading-hint {
+      margin-top: 14px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748B;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    @keyframes indeterminate-progress {
+      0% { left: -50%; width: 40%; }
+      50% { left: 25%; width: 60%; }
+      100% { left: 100%; width: 40%; }
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 10px 30px rgba(2, 132, 199, 0.35);
+      }
+      50% {
+        transform: scale(1.04);
+        box-shadow: 0 15px 40px rgba(2, 132, 199, 0.6);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading-splash">
+    <div class="splash-card">
+      <div class="logo-container" style="background: white; padding: 6px;">
+        <img src="favicon.png" alt="Jay Pharma Logo" style="width: 68px; height: 68px; object-fit: contain;">
+      </div>
+      <div class="brand-title">JAY PHARMA (PVT) LTD</div>
+      <div class="brand-subtitle">Delivering Wellness, Building Trust</div>
+      <div class="loader-bar-bg">
+        <div class="loader-bar-fill"></div>
+      </div>
+      <div class="loading-hint">Initializing Application...</div>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('flutter-first-frame', function() {
+      var splash = document.getElementById('loading-splash');
+      if (splash) {
+        splash.style.opacity = '0';
+        splash.style.pointerEvents = 'none';
+        setTimeout(function() {
+          splash.remove();
+        }, 400);
+      }
+    });
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
