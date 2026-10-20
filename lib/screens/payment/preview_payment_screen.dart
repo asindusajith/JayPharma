@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -356,11 +357,14 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                         const SizedBox(width: 8),
                         ElevatedButton(
                           onPressed: () async {
-                            if (appState.isLocationPermissionNeeded) {
-                              await appState.requestAndConnectGps();
-                            } else {
-                              await LocationService.openLocationSettings();
-                              await appState.requestAndConnectGps();
+                            final loc = await appState.requestAndConnectGps();
+                            if (loc != null && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(lang == 'si' ? 'GPS සාර්ථකව සම්බන්ධ විය!' : 'GPS connected!'),
+                                  backgroundColor: const Color(0xFF16A34A),
+                                ),
+                              );
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -461,36 +465,120 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                 ),
               ],
             ),
-            content: Text(
-              isPermNeeded
-                  ? (lang == 'si'
-                      ? 'දුරකථනයේ GPS සක්‍රීයව පවතී. නමුත් බිල්පත නිකුත් කිරීමට App එකට Location අවසරය ලබා දීම අනිවාර්ය වේ.'
-                      : 'GPS is ON. However, Location permission must be granted to issue this bill.')
-                  : (lang == 'si'
-                      ? 'ඔබගේ දුරකථනයේ GPS අක්‍රිය කර ඇත. බිල්පත නිකුත් කළ නියම ස්ථානය සටහන් වීමට GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ. GPS නොමැතිව බිල්පත් නිකුත් කළ නොහැක.'
-                      : 'Device GPS is disabled. GPS must be enabled to record the billing location. Billing is strictly blocked without GPS.'),
-              style: GoogleFonts.inter(fontSize: 13.5, height: 1.4),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (kIsWeb) ...[
+                    Text(
+                      lang == 'si'
+                          ? 'බිල්පත නිකුත් කිරීමට Browser එකෙන් Location අවසරය ලබා දිය යුතුය:'
+                          : 'Please allow Location in Chrome to issue this bill:',
+                      style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.tune_rounded, size: 18, color: Color(0xFF2563EB)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  lang == 'si'
+                                      ? '1. Chrome ඉහළ Address Bar එකේ jaypharma.vercel.app ඉදිරියෙන් ඇති 🔒 හෝ 🎛️ icon එක ඔබන්න.'
+                                      : '1. Tap the 🔒 or 🎛️ icon in the Chrome address bar.',
+                                  style: GoogleFonts.inter(fontSize: 12, height: 1.35),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.check_circle_outline, size: 18, color: Color(0xFF16A34A)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  lang == 'si'
+                                      ? '2. "Location" Setting එක "Allow" ලෙස සකසන්න.'
+                                      : '2. Change "Location" to "Allow".',
+                                  style: GoogleFonts.inter(fontSize: 12, height: 1.35),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else ...[
+                    Text(
+                      lang == 'si'
+                          ? (isPermNeeded
+                              ? 'බිල්පත නිකුත් කිරීමට App එකට Location අවසරය ලබා දීම අනිවාර්ය වේ.'
+                              : 'ඔබගේ දුරකථනයේ GPS අක්‍රිය කර ඇත. බිල්පත නිකුත් කිරීමට GPS සක්‍රීය කරන්න.')
+                          : (isPermNeeded
+                              ? 'Location permission must be granted to issue this bill.'
+                              : 'Device GPS is disabled. GPS must be enabled to record the billing location.'),
+                      style: GoogleFonts.inter(fontSize: 13.5, height: 1.4),
+                    ),
+                  ],
+                ],
+              ),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: Text(lang == 'si' ? 'අවලංගු කරන්න' : 'Cancel'),
               ),
+              if (!kIsWeb)
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    if (isPermNeeded) {
+                      await LocationService.openAppSettings();
+                    } else {
+                      await LocationService.openLocationSettings();
+                    }
+                  },
+                  icon: const Icon(Icons.settings, size: 16, color: Colors.white),
+                  label: Text(
+                    isPermNeeded
+                        ? (lang == 'si' ? 'App Settings වෙත යන්න' : 'Open App Settings')
+                        : (lang == 'si' ? 'GPS Settings වෙත යන්න' : 'Open Location Settings'),
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
               ElevatedButton.icon(
                 onPressed: () async {
                   Navigator.pop(ctx);
-                  if (isPermNeeded) {
-                    await appState.requestAndConnectGps();
-                  } else {
-                    await LocationService.openLocationSettings();
-                    await appState.requestAndConnectGps();
+                  final loc = await appState.requestAndConnectGps();
+                  if (loc != null && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(lang == 'si' ? 'GPS සම්බන්ධ විය!' : 'GPS Connected!'),
+                        backgroundColor: const Color(0xFF16A34A),
+                      ),
+                    );
                   }
                 },
-                icon: Icon(isPermNeeded ? Icons.check_circle : Icons.location_on, size: 16, color: Colors.white),
+                icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.white),
                 label: Text(
-                  isPermNeeded
-                      ? (lang == 'si' ? 'අවසර ලබා දෙන්න' : 'Grant Permission')
-                      : (lang == 'si' ? 'GPS සක්‍රීය කරන්න' : 'Enable GPS'),
+                  lang == 'si' ? 'නැවත සම්බන්ධ කරන්න' : 'Connect GPS',
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(

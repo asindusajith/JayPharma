@@ -206,17 +206,19 @@ class AppState extends ChangeNotifier {
   }
 
   /// Actively connect to device hardware GPS (prompts permission, gets real coordinates)
-  Future<void> requestAndConnectGps() async {
-    if (isConnectingGps) return;
+  Future<LocationData?> requestAndConnectGps() async {
+    if (isConnectingGps) return LocationService.lastKnownLocation;
     isConnectingGps = true;
     notifyListeners();
 
     try {
-      await LocationService.requestAndConnectGps();
+      final loc = await LocationService.requestAndConnectGps();
       final status = await LocationService.checkStatus();
       gpsStatus = status;
+      return loc;
     } catch (e) {
       debugPrint('requestAndConnectGps failed: $e');
+      return null;
     } finally {
       isConnectingGps = false;
       notifyListeners();

@@ -49,6 +49,8 @@ class LocationService {
   static bool _isConnecting = false;
   static bool get isConnecting => _isConnecting;
   static bool _deviceHardwareGpsOff = false;
+  static String? _lastError;
+  static String? get lastError => _lastError;
 
   /// Pure status check — safe to run in periodic timers without prompting the user
   static Future<GpsStatusResult> checkStatus() async {
@@ -119,70 +121,89 @@ class LocationService {
   static Future<LocationData?> requestAndConnectGps() async {
     if (_isConnecting) return _lastKnownLocation;
     _isConnecting = true;
+    _lastError = null;
 
     try {
-      // 1. Verify hardware Location service switch
-      bool serviceEnabled = false;
-      try {
-        serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      } catch (_) {
-        serviceEnabled = true;
-      }
-
-      if (!serviceEnabled) {
-        debugPrint('Location hardware switch is disabled on device');
-        _deviceHardwareGpsOff = true;
-        _isConnecting = false;
-        return null;
-      }
-
-      // 2. Request permission if not yet granted
-      LocationPermission permission = LocationPermission.denied;
-      try {
-        permission = await Geolocator.checkPermission();
-      } catch (_) {}
-
-      if (permission == LocationPermission.denied) {
+      // 1. Verify hardware Location service switch if on mobile
+      if (!kIsWeb) {
+        bool serviceEnabled = false;
         try {
-          permission = await Geolocator.requestPermission();
+          serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        } catch (_) {
+          serviceEnabled = true;
+        }
+
+        if (!serviceEnabled) {
+          debugPrint('Location hardware switch is disabled on device');
+          _deviceHardwareGpsOff = true;
+          _lastError = 'service_disabled';
+          _isConnecting = false;
+          return null;
+        }
+
+        // On mobile, request permission if not yet granted
+        LocationPermission permission = LocationPermission.denied;
+        try {
+          permission = await Geolocator.checkPermission();
         } catch (_) {}
+
+        if (permission == LocationPermission.denied) {
+          try {
+            permission = await Geolocator.requestPermission();
+          } catch (_) {}
+        }
+
+        if (permission == LocationPermission.deniedForever) {
+          debugPrint('Location permission deniedForever on mobile');
+          _lastError = 'permission_denied_forever';
+          _isConnecting = false;
+          return null;
+        }
       }
 
-      if (permission == LocationPermission.deniedForever) {
-        debugPrint('Location permission deniedForever');
-        _isConnecting = false;
-        return null;
-      }
-
-      // 3. Acquire live hardware position
+      // 2. Acquire live hardware position (On Web this directly triggers browser prompt)
       Position? position;
       try {
         position = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
-            timeLimit: Duration(seconds: 12),
+            timeLimit: Duration(seconds: 15),
           ),
         );
       } catch (e) {
         final errStr = e.toString().toLowerCase();
-        if (errStr.contains('service') && errStr.contains('disabled')) {
-          _deviceHardwareGpsOff = true;
+        debugPrint('High accuracy GPS error: $e');
+
+        if (errStr.contains('denied')) {
+          _lastError = 'permission_denied';
           _isConnecting = false;
           return null;
         }
 
-        debugPrint('High accuracy GPS timed out ($e), trying medium accuracy...');
+        if (errStr.contains('service') && errStr.contains('disabled')) {
+          _deviceHardwareGpsOff = true;
+          _lastError = 'service_disabled';
+          _isConnecting = false;
+          return null;
+        }
+
         try {
           position = await Geolocator.getCurrentPosition(
             locationSettings: const LocationSettings(
               accuracy: LocationAccuracy.medium,
-              timeLimit: Duration(seconds: 8),
+              timeLimit: Duration(seconds: 10),
             ),
           );
         } catch (e2) {
           final errStr2 = e2.toString().toLowerCase();
+          if (errStr2.contains('denied')) {
+            _lastError = 'permission_denied';
+            _isConnecting = false;
+            return null;
+          }
           if (errStr2.contains('service') && errStr2.contains('disabled')) {
             _deviceHardwareGpsOff = true;
+            _lastError = 'service_disabled';
             _isConnecting = false;
             return null;
           }
@@ -194,6 +215,7 @@ class LocationService {
 
       if (position != null && position.latitude != 0.0 && position.longitude != 0.0) {
         _deviceHardwareGpsOff = false;
+        _lastError = null;
         final loc = LocationData(
           latitude: position.latitude,
           longitude: position.longitude,
@@ -209,10 +231,14 @@ class LocationService {
         return loc;
       }
 
+      if (_lastError == null) {
+        _lastError = 'position_unavailable';
+      }
       _isConnecting = false;
       return null;
     } catch (e) {
       debugPrint('requestAndConnectGps error: $e');
+      _lastError = e.toString();
       _isConnecting = false;
       return null;
     }
