@@ -196,10 +196,18 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: appState.isGpsOnline ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                            color: appState.isGpsOnline
+                                ? const Color(0xFFDCFCE7)
+                                : (appState.isLocationPermissionNeeded
+                                    ? const Color(0xFFFEF3C7)
+                                    : const Color(0xFFFEE2E2)),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: appState.isGpsOnline ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5),
+                              color: appState.isGpsOnline
+                                  ? const Color(0xFF86EFAC)
+                                  : (appState.isLocationPermissionNeeded
+                                      ? const Color(0xFFFCD34D)
+                                      : const Color(0xFFFCA5A5)),
                               width: 0.8,
                             ),
                           ),
@@ -210,7 +218,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                 width: 7,
                                 height: 7,
                                 decoration: BoxDecoration(
-                                  color: appState.isGpsOnline ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                  color: appState.isGpsOnline
+                                      ? const Color(0xFF16A34A)
+                                      : (appState.isLocationPermissionNeeded
+                                          ? const Color(0xFFD97706)
+                                          : const Color(0xFFDC2626)),
                                   shape: BoxShape.circle,
                                 ),
                               ),
@@ -218,11 +230,17 @@ class _HomeScreenState extends State<HomeScreen> {
                               Text(
                                 appState.isGpsOnline
                                     ? (lang == 'si' ? 'GPS සක්‍රීයයි' : 'GPS Online')
-                                    : (lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline'),
+                                    : (appState.isLocationPermissionNeeded
+                                        ? (lang == 'si' ? 'අවසරය අවශ්‍යයි' : 'Permission Req.')
+                                        : (lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline')),
                                 style: GoogleFonts.inter(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.bold,
-                                  color: appState.isGpsOnline ? const Color(0xFF15803D) : const Color(0xFFB91C1C),
+                                  color: appState.isGpsOnline
+                                      ? const Color(0xFF15803D)
+                                      : (appState.isLocationPermissionNeeded
+                                          ? const Color(0xFFB45309)
+                                          : const Color(0xFFB91C1C)),
                                 ),
                               ),
                             ],
@@ -233,29 +251,49 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
 
-                // GPS Offline Warning Alert Banner
+                // GPS Offline / Permission Alert Banner
                 if (!appState.isGpsOnline) ...[
                   const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2),
+                      color: appState.isLocationPermissionNeeded
+                          ? const Color(0xFFFFFBEB)
+                          : const Color(0xFFFEF2F2),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFFCA5A5)),
+                      border: Border.all(
+                        color: appState.isLocationPermissionNeeded
+                            ? const Color(0xFFFDE68A)
+                            : const Color(0xFFFCA5A5),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.location_off_rounded, color: Color(0xFFDC2626), size: 20),
+                        Icon(
+                          appState.isLocationPermissionNeeded
+                              ? Icons.security_update_warning_rounded
+                              : Icons.location_off_rounded,
+                          color: appState.isLocationPermissionNeeded
+                              ? const Color(0xFFD97706)
+                              : const Color(0xFFDC2626),
+                          size: 20,
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            lang == 'si'
-                                ? 'දුරකථනයේ GPS අක්‍රියයි. නියම ස්ථානය සටහන් වීමට කරුණාකර GPS සක්‍රීය කරන්න.'
-                                : 'Device GPS is disabled. Please enable GPS so billing locations are recorded accurately.',
+                            appState.isLocationPermissionNeeded
+                                ? (lang == 'si'
+                                    ? 'GPS සක්‍රීයයි! බිල්පත් කිරීමට App එකට Location අවසරය ලබා දෙන්න.'
+                                    : 'GPS is ON! Please grant Location permission to allow billing.')
+                                : (lang == 'si'
+                                    ? 'දුරකථනයේ GPS අක්‍රියයි. බිල්පත් කිරීමට Settings වෙතින් GPS සක්‍රීය කරන්න.'
+                                    : 'Device GPS is disabled. GPS must be enabled to issue bills.'),
                             style: GoogleFonts.inter(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w600,
-                              color: const Color(0xFF991B1B),
+                              color: appState.isLocationPermissionNeeded
+                                  ? const Color(0xFF92400E)
+                                  : const Color(0xFF991B1B),
                               height: 1.3,
                             ),
                           ),
@@ -263,18 +301,26 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(width: 8),
                         ElevatedButton(
                           onPressed: () async {
-                            await LocationService.openLocationSettings();
+                            if (appState.isLocationPermissionNeeded) {
+                              await appState.requestGpsPermission();
+                            } else {
+                              await LocationService.openLocationSettings();
+                            }
                             await appState.checkGpsStatus();
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFDC2626),
+                            backgroundColor: appState.isLocationPermissionNeeded
+                                ? const Color(0xFFD97706)
+                                : const Color(0xFFDC2626),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             minimumSize: Size.zero,
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                           ),
                           child: Text(
-                            lang == 'si' ? 'සක්‍රීය කරන්න' : 'Enable',
+                            appState.isLocationPermissionNeeded
+                                ? (lang == 'si' ? 'අවසර දෙන්න' : 'Allow')
+                                : (lang == 'si' ? 'සක්‍රීය කරන්න' : 'Enable'),
                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
                         ),
@@ -458,18 +504,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   subtitle: LocalizationService.tr('accept_payment_sub', lang: lang),
                   icon: Icons.add_circle,
                   color: AppTheme.primaryBlue,
-                  badge: appState.isDayEndFinalized ? LocalizationService.tr('day_end_locked', lang: lang) : null,
-                  badgeColor: AppTheme.dangerRed,
-                  onTap: () {
-                    if (appState.isDayEndFinalized) {
-                      _showDayEndLockedDialog(context, lang);
-                    } else {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const SelectCustomerScreen()),
-                      );
-                    }
-                  },
+                  badge: appState.isDayEndFinalized
+                      ? LocalizationService.tr('day_end_locked', lang: lang)
+                      : (!appState.isGpsOnline ? (lang == 'si' ? 'GPS අවශ්‍යයි' : 'GPS Required') : null),
+                  badgeColor: appState.isDayEndFinalized ? AppTheme.dangerRed : const Color(0xFFDC2626),
+                  onTap: () => _handleAcceptPaymentTap(context, appState, lang),
                 ),
                 const SizedBox(height: 10),
 
@@ -701,8 +740,94 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _handleAcceptPaymentTap(BuildContext context, AppState appState, String lang) async {
+    if (appState.isDayEndFinalized) {
+      _showDayEndLockedDialog(context, lang);
+      return;
+    }
+
+    await appState.checkGpsStatus();
+
+    if (!appState.isGpsOnline) {
+      if (!context.mounted) return;
+      _showGpsRequiredForBillingDialog(context, appState, lang);
+      return;
+    }
+
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SelectCustomerScreen()),
+    );
+  }
+
+  void _showGpsRequiredForBillingDialog(BuildContext context, AppState appState, String lang) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.location_off_rounded, color: Color(0xFFDC2626), size: 24),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                lang == 'si' ? 'GPS අවශ්‍යයි - බිල්පත් කිරීම අවහිරයි' : 'GPS Required - Billing Blocked',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          appState.isLocationPermissionNeeded
+              ? (lang == 'si'
+                  ? 'දුරකථනයේ GPS සක්‍රීයව පවතී. නමුත් බිල්පතක් නිකුත් කිරීමට App එකට Location අවසරය ලබා දීම අනිවාර්ය වේ. කරුණාකර අවසරය ලබා දෙන්න.'
+                  : 'GPS is ON. However, Location permission must be granted to issue bills. Please grant permission.')
+              : (lang == 'si'
+                  ? 'දුරකථනයේ GPS අක්‍රිය කර ඇත. බිල්පත් කළ ස්ථානය නිවැරදිව සටහන් කරගැනීම සඳහා GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ. GPS නොමැතිව බිල්පත් නිකුත් කළ නොහැක.'
+                  : 'Device GPS is disabled. GPS must be enabled to record the exact billing location. Billing is strictly blocked without GPS.'),
+          style: GoogleFonts.inter(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(lang == 'si' ? 'අවලංගු කරන්න' : 'Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              if (appState.isLocationPermissionNeeded) {
+                await appState.requestGpsPermission();
+              } else {
+                await LocationService.openLocationSettings();
+              }
+              await appState.checkGpsStatus();
+            },
+            icon: Icon(
+              appState.isLocationPermissionNeeded ? Icons.check_circle : Icons.location_on,
+              size: 16,
+              color: Colors.white,
+            ),
+            label: Text(
+              appState.isLocationPermissionNeeded
+                  ? (lang == 'si' ? 'අවසර ලබා දෙන්න' : 'Grant Permission')
+                  : (lang == 'si' ? 'GPS සක්‍රීය කරන්න' : 'Enable GPS'),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF16A34A),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showGpsDialog(BuildContext context, AppState appState, String lang) {
     final isOnline = appState.isGpsOnline;
+    final isPermNeeded = appState.isLocationPermissionNeeded;
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -710,14 +835,20 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Row(
           children: [
             Icon(
-              isOnline ? Icons.location_on_rounded : Icons.location_off_rounded,
-              color: isOnline ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+              isOnline
+                  ? Icons.location_on_rounded
+                  : (isPermNeeded ? Icons.security_update_warning_rounded : Icons.location_off_rounded),
+              color: isOnline
+                  ? const Color(0xFF16A34A)
+                  : (isPermNeeded ? const Color(0xFFD97706) : const Color(0xFFDC2626)),
             ),
             const SizedBox(width: 8),
             Text(
               isOnline
                   ? (lang == 'si' ? 'GPS සක්‍රීයයි' : 'GPS Online')
-                  : (lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline'),
+                  : (isPermNeeded
+                      ? (lang == 'si' ? 'අවසරය අවශ්‍යයි' : 'Permission Needed')
+                      : (lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline')),
               style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18),
             ),
           ],
@@ -727,9 +858,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ? (lang == 'si'
                   ? 'ඔබගේ දුරකථනයේ GPS සක්‍රීයව ක්‍රියාත්මක වේ. බිල්පත් කිරීමේදී නියම ස්ථානය සටහන් වේ.'
                   : 'Device GPS is active and ready. Billing and field visit locations will be recorded with high accuracy.')
-              : (lang == 'si'
-                  ? 'ඔබගේ දුරකථනයේ GPS අක්‍රිය කර ඇත. බිල්පත් කිරීමේදී නියම ස්ථානය සටහන් වීමට කරුණාකර දුරකථනයේ GPS / Location Services සක්‍රීය කරන්න.'
-                  : 'Device GPS is currently disabled. Please enable Location Services / GPS so receipts and collector stops can be tracked accurately.'),
+              : (isPermNeeded
+                  ? (lang == 'si'
+                      ? 'දුරකථනයේ GPS සක්‍රීයව පවතී. නමුත් App එකට Location අවසරය ලබා දිය යුතුය. පහත බොත්තම ඔබා අවසරය ලබා දෙන්න.'
+                      : 'GPS is ON. Please grant location permission to the app by tapping the button below.')
+                  : (lang == 'si'
+                      ? 'ඔබගේ දුරකථනයේ GPS අක්‍රිය කර ඇත. බිල්පත් නිකුත් කිරීමට දුරකථනයේ Settings වෙතින් Location Services / GPS සක්‍රීය කරන්න.'
+                      : 'Device GPS is currently disabled. Please enable Location Services / GPS so receipts can be issued.')),
           style: GoogleFonts.inter(fontSize: 13.5, height: 1.4),
         ),
         actions: [
@@ -737,16 +872,22 @@ class _HomeScreenState extends State<HomeScreen> {
             ElevatedButton.icon(
               onPressed: () async {
                 Navigator.pop(ctx);
-                await LocationService.openLocationSettings();
+                if (isPermNeeded) {
+                  await appState.requestGpsPermission();
+                } else {
+                  await LocationService.openLocationSettings();
+                }
                 await appState.checkGpsStatus();
               },
-              icon: const Icon(Icons.settings, size: 16, color: Colors.white),
+              icon: Icon(isPermNeeded ? Icons.check_circle : Icons.settings, size: 16, color: Colors.white),
               label: Text(
-                lang == 'si' ? 'GPS සක්‍රීය කරන්න' : 'Open Location Settings',
+                isPermNeeded
+                    ? (lang == 'si' ? 'අවසර ලබා දෙන්න' : 'Grant Permission')
+                    : (lang == 'si' ? 'GPS සක්‍රීය කරන්න' : 'Open Location Settings'),
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A),
+                backgroundColor: isPermNeeded ? const Color(0xFFD97706) : const Color(0xFF16A34A),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
             ),

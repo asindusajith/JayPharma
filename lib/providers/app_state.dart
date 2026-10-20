@@ -151,9 +151,19 @@ class AppState extends ChangeNotifier {
   bool draftIsAdvancePayment = false;
 
   // Real-time Device Hardware GPS Status
-  bool isGpsOnline = false;
+  GpsStatusResult gpsStatus = const GpsStatusResult(
+    isServiceEnabled: false,
+    permission: LocationPermission.denied,
+    hasPermission: false,
+    isReady: false,
+  );
   StreamSubscription<ServiceStatus>? _gpsServiceSubscription;
   Timer? _gpsCheckTimer;
+
+  bool get isGpsOnline => gpsStatus.isReady;
+  bool get isGpsHardwareOn => gpsStatus.isServiceEnabled;
+  bool get hasLocationPermission => gpsStatus.hasPermission;
+  bool get isLocationPermissionNeeded => gpsStatus.isPermissionNeeded;
 
   AppState() {
     _initSampleData();
@@ -169,33 +179,34 @@ class AppState extends ChangeNotifier {
 
     try {
       _gpsServiceSubscription = Geolocator.getServiceStatusStream().listen((status) {
-        final online = status == ServiceStatus.enabled;
-        if (isGpsOnline != online) {
-          isGpsOnline = online;
-          notifyListeners();
-        }
+        checkGpsStatus();
       });
     } catch (_) {}
 
-    // Periodic check every 5 seconds for status or permission toggle
-    _gpsCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    // Safe periodic check every 4 seconds without prompting permissions in background
+    _gpsCheckTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       checkGpsStatus();
     });
   }
 
   Future<void> checkGpsStatus() async {
     try {
-      final available = await LocationService.isGpsAvailable();
-      if (isGpsOnline != available) {
-        isGpsOnline = available;
+      final status = await LocationService.checkStatus();
+      if (gpsStatus.isReady != status.isReady ||
+          gpsStatus.isServiceEnabled != status.isServiceEnabled ||
+          gpsStatus.hasPermission != status.hasPermission) {
+        gpsStatus = status;
         notifyListeners();
       }
-    } catch (_) {
-      if (isGpsOnline) {
-        isGpsOnline = false;
-        notifyListeners();
-      }
-    }
+    } catch (_) {}
+  }
+
+  Future<void> requestGpsPermission() async {
+    try {
+      final status = await LocationService.requestPermission();
+      gpsStatus = status;
+      notifyListeners();
+    } catch (_) {}
   }
 
   @override
@@ -929,7 +940,26 @@ class AppState extends ChangeNotifier {
       throw Exception(validation);
     }
 
+    // Strict GPS validation — mandatory hardware GPS lock required for issuing any bill
+    final gpsCheck = await LocationService.checkStatus();
+    if (!gpsCheck.isReady) {
+      if (!gpsCheck.isServiceEnabled) {
+        throw Exception(
+          'බිල්පතක් නිකුත් කිරීමට දුරකථනයේ GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ. කරුණාකර ඔබගේ දුරකථනයේ GPS සක්‍රීය කරන්න. (Device GPS is OFF)',
+        );
+      } else {
+        throw Exception(
+          'බිල්පතක් නිකුත් කිරීමට App එකට Location අවසරය ලබා දිය යුතුය. කරුණාකර Location අවසරය ලබා දෙන්න. (Location permission required)',
+        );
+      }
+    }
+
     final loc = await LocationService.getCurrentLocation();
+    if (!loc.isValid) {
+      throw Exception(
+        'වලංගු GPS සංඥාවක් ලබා ගැනීමට නොහැකි විය. කරුණාකර GPS සංඥා ලැබෙන ස්ථානයක සිට නැවත උත්සාහ කරන්න.',
+      );
+    }
     final effectiveLocationAddress = (loc.address.isNotEmpty)
         ? loc.address
         : (draftCustomer?.address.isNotEmpty == true

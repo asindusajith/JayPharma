@@ -24,47 +24,78 @@ class LocationData {
   bool get isValid => latitude != 0.0 && longitude != 0.0;
 }
 
-class LocationService {
-  static StreamSubscription<ServiceStatus>? _statusSubscription;
-  static bool _lastKnownGpsStatus = false;
+class GpsStatusResult {
+  final bool isServiceEnabled;
+  final LocationPermission permission;
+  final bool hasPermission;
+  final bool isReady;
 
-  /// Check if device hardware GPS is turned on AND permission is granted
-  static Future<bool> isGpsAvailable() async {
+  const GpsStatusResult({
+    required this.isServiceEnabled,
+    required this.permission,
+    required this.hasPermission,
+    required this.isReady,
+  });
+
+  bool get isPermissionNeeded => isServiceEnabled && !hasPermission;
+}
+
+class LocationService {
+  /// Pure status check — NEVER prompts or spams in background
+  static Future<GpsStatusResult> checkStatus() async {
     try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _lastKnownGpsStatus = false;
-        return false;
+      bool serviceEnabled = false;
+      try {
+        serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      } catch (_) {
+        serviceEnabled = true;
       }
 
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
+      LocationPermission permission = LocationPermission.denied;
+      try {
+        permission = await Geolocator.checkPermission();
+      } catch (_) {
+        permission = LocationPermission.denied;
       }
 
       final hasPermission = permission == LocationPermission.whileInUse ||
           permission == LocationPermission.always;
-      _lastKnownGpsStatus = hasPermission;
-      return hasPermission;
+
+      return GpsStatusResult(
+        isServiceEnabled: serviceEnabled,
+        permission: permission,
+        hasPermission: hasPermission,
+        isReady: serviceEnabled && hasPermission,
+      );
     } catch (e) {
-      debugPrint('Error checking GPS availability: $e');
-      _lastKnownGpsStatus = false;
-      return false;
+      debugPrint('LocationService.checkStatus error: $e');
+      return const GpsStatusResult(
+        isServiceEnabled: false,
+        permission: LocationPermission.denied,
+        hasPermission: false,
+        isReady: false,
+      );
     }
   }
 
-  /// Check specifically if the device Location Service (GPS toggle) is switched ON
-  static Future<bool> isServiceEnabled() async {
+  /// Quick boolean check whether GPS is currently active and ready for billing
+  static Future<bool> isGpsAvailable() async {
+    final status = await checkStatus();
+    return status.isReady;
+  }
+
+  /// Explicitly requests location permission from user (MUST be triggered by user action)
+  static Future<GpsStatusResult> requestPermission() async {
     try {
-      return await Geolocator.isLocationServiceEnabled();
-    } catch (_) {
-      return false;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      return await checkStatus();
+    } catch (e) {
+      debugPrint('LocationService.requestPermission error: $e');
+      return await checkStatus();
     }
-  }
-
-  /// Request permission if needed
-  static Future<LocationPermission> requestPermission() async {
-    return await Geolocator.requestPermission();
   }
 
   /// Open device Location Settings screen (Android/iOS)
@@ -85,34 +116,41 @@ class LocationService {
     }
   }
 
-  /// Captures collector's exact current GPS coordinates from device hardware
+  /// Captures collector's exact current GPS coordinates from device hardware.
+  /// Throws descriptive exceptions if GPS is off or permission is denied so billing is strictly blocked.
   static Future<LocationData> getCurrentLocation() async {
-    // 1. Check if hardware GPS is enabled
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    // 1. Verify hardware GPS switch
+    bool serviceEnabled = false;
+    try {
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    } catch (_) {
+      serviceEnabled = true;
+    }
+
     if (!serviceEnabled) {
       throw Exception(
-        'GPS is disabled on your device. Please turn on Location/GPS to proceed.',
+        'දුරකථනයේ GPS අක්‍රිය කර ඇත. බිල්පත නිකුත් කිරීමට කරුණාකර දුරකථනයේ GPS / Location Services සක්‍රීය කරන්න. (Device GPS is disabled)',
       );
     }
 
-    // 2. Check & request permission
+    // 2. Verify & request permission
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
         throw Exception(
-          'Location permission was denied. Please allow location access to record bills.',
+          'Location අවසරය ප්‍රතික්ෂේප කර ඇත. බිල්පත නිකුත් කිරීමට App එකට Location අවසරය ලබා දෙන්න. (Location permission denied)',
         );
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
       throw Exception(
-        'Location permission is permanently denied. Please enable location permissions in App Settings.',
+        'Location අවසරය අක්‍රිය කර ඇත. කරුණාකර App Settings වෙත ගොස් Location අවසරය සක්‍රීය කරන්න. (Location permission denied forever)',
       );
     }
 
-    // 3. Obtain real GPS coordinates from hardware
+    // 3. Acquire live hardware position
     Position? position;
     try {
       position = await Geolocator.getCurrentPosition(
@@ -125,7 +163,6 @@ class LocationService {
       debugPrint('High accuracy GPS timed out, trying last known position: $e');
       position = await Geolocator.getLastKnownPosition();
       if (position == null) {
-        // Last effort with lower accuracy setting
         position = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.medium,
@@ -135,8 +172,10 @@ class LocationService {
       }
     }
 
-    if (position == null) {
-      throw Exception('Unable to acquire GPS satellite signal. Please move to an open area and try again.');
+    if (position == null || (position.latitude == 0.0 && position.longitude == 0.0)) {
+      throw Exception(
+        'නියම GPS සංඥාව ලබා ගැනීමට නොහැකි විය. කරුණාකර විවෘත ස්ථානයකට ගොස් නැවත උත්සාහ කරන්න. (Unable to acquire satellite GPS lock)',
+      );
     }
 
     // 4. Reverse geocode coordinates into a human-readable street address in Sri Lanka
@@ -158,7 +197,7 @@ class LocationService {
         }
       }
     } catch (_) {
-      // Offline fallback: retains the exact GPS coordinates string
+      // Offline fallback: retains exact coordinates string
     }
 
     return LocationData(

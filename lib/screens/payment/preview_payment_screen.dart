@@ -317,11 +317,75 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                 ),
                 const SizedBox(height: 24),
 
+                // GPS Mandatory Warning Banner
+                if (!appState.isGpsOnline) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: appState.isLocationPermissionNeeded ? const Color(0xFFFFFBEB) : const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: appState.isLocationPermissionNeeded ? const Color(0xFFFDE68A) : const Color(0xFFFCA5A5),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          appState.isLocationPermissionNeeded ? Icons.security_update_warning_rounded : Icons.location_off_rounded,
+                          color: appState.isLocationPermissionNeeded ? const Color(0xFFD97706) : const Color(0xFFDC2626),
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            appState.isLocationPermissionNeeded
+                                ? (lang == 'si'
+                                    ? 'GPS සක්‍රීයයි! බිල්පත නිකුත් කිරීමට Location අවසරය ලබා දීම අනිවාර්ය වේ.'
+                                    : 'GPS is ON! Location permission must be granted to issue this bill.')
+                                : (lang == 'si'
+                                    ? 'GPS අක්‍රියයි! බිල්පතක් නිකුත් කිරීමට දුරකථනයේ GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ.'
+                                    : 'GPS is disabled! GPS must be turned on to record the billing location.'),
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: appState.isLocationPermissionNeeded ? const Color(0xFF92400E) : const Color(0xFF991B1B),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () async {
+                            if (appState.isLocationPermissionNeeded) {
+                              await appState.requestGpsPermission();
+                            } else {
+                              await LocationService.openLocationSettings();
+                            }
+                            await appState.checkGpsStatus();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: appState.isLocationPermissionNeeded ? const Color(0xFFD97706) : const Color(0xFFDC2626),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: Text(
+                            appState.isLocationPermissionNeeded
+                                ? (lang == 'si' ? 'අවසර දෙන්න' : 'Allow')
+                                : (lang == 'si' ? 'සක්‍රීය කරන්න' : 'Enable'),
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
                 // Action Buttons matching Page 4 ("Generate Receipt" & "Edit Details")
                 ElevatedButton(
                   onPressed: _isSubmitting ? null : _handleGenerateReceipt,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
+                    backgroundColor: appState.isGpsOnline ? AppTheme.primaryNavy : const Color(0xFF64748B),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: _isSubmitting
@@ -375,54 +439,70 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
     final appState = Provider.of<AppState>(context, listen: false);
     final lang = appState.currentLanguage;
 
-    // Verify hardware GPS is active so real location can be recorded
-    final isGpsOn = await LocationService.isGpsAvailable();
-    if (!isGpsOn && mounted) {
-      final proceed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              const Icon(Icons.location_off_rounded, color: Color(0xFFDC2626)),
-              const SizedBox(width: 8),
-              Text(
-                lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18),
+    await appState.checkGpsStatus();
+
+    // STRICT GPS HARD-BLOCK: Cannot issue bill without active GPS
+    if (!appState.isGpsOnline) {
+      if (mounted) {
+        final isPermNeeded = appState.isLocationPermissionNeeded;
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                const Icon(Icons.block_rounded, color: Color(0xFFDC2626), size: 24),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    lang == 'si' ? 'GPS අවශ්‍යයි - බිල්පත් කිරීම අවහිරයි' : 'GPS Required - Billing Blocked',
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 17),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              isPermNeeded
+                  ? (lang == 'si'
+                      ? 'දුරකථනයේ GPS සක්‍රීයව පවතී. නමුත් බිල්පත නිකුත් කිරීමට App එකට Location අවසරය ලබා දීම අනිවාර්ය වේ.'
+                      : 'GPS is ON. However, Location permission must be granted to issue this bill.')
+                  : (lang == 'si'
+                      ? 'ඔබගේ දුරකථනයේ GPS අක්‍රිය කර ඇත. බිල්පත නිකුත් කළ නියම ස්ථානය සටහන් වීමට GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ. GPS නොමැතිව බිල්පත් නිකුත් කළ නොහැක.'
+                      : 'Device GPS is disabled. GPS must be enabled to record the billing location. Billing is strictly blocked without GPS.'),
+              style: GoogleFonts.inter(fontSize: 13.5, height: 1.4),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(lang == 'si' ? 'අවලංගු කරන්න' : 'Cancel'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  if (isPermNeeded) {
+                    await appState.requestGpsPermission();
+                  } else {
+                    await LocationService.openLocationSettings();
+                  }
+                  await appState.checkGpsStatus();
+                },
+                icon: Icon(isPermNeeded ? Icons.check_circle : Icons.location_on, size: 16, color: Colors.white),
+                label: Text(
+                  isPermNeeded
+                      ? (lang == 'si' ? 'අවසර ලබා දෙන්න' : 'Grant Permission')
+                      : (lang == 'si' ? 'GPS සක්‍රීය කරන්න' : 'Enable GPS'),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF16A34A),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
               ),
             ],
           ),
-          content: Text(
-            lang == 'si'
-                ? 'බිල්පත නිකුත් කරන ස්ථානය නිවැරදිව සටහන් වීමට ඔබගේ දුරකථනයේ GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ. කරුණාකර GPS සක්‍රීය කරන්න.'
-                : 'Device GPS is disabled. GPS must be enabled so the exact billing location can be recorded.',
-            style: GoogleFonts.inter(fontSize: 13.5, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(lang == 'si' ? 'අවලංගු කරන්න' : 'Cancel'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () async {
-                Navigator.pop(ctx, true);
-                await LocationService.openLocationSettings();
-              },
-              icon: const Icon(Icons.settings, size: 16, color: Colors.white),
-              label: Text(
-                lang == 'si' ? 'GPS සක්‍රීය කරන්න' : 'Open Location Settings',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-            ),
-          ],
-        ),
-      );
-      if (proceed != true) return;
-      await appState.checkGpsStatus();
+        );
+      }
+      return; // STRICT HARD-BLOCK!
     }
 
     setState(() => _isSubmitting = true);
