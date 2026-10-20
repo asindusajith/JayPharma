@@ -6,6 +6,7 @@ import '../providers/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/jay_pharma_logo.dart';
 import '../services/localization_service.dart';
+import '../services/location_service.dart';
 import 'payment/select_customer_screen.dart';
 import 'receipts/receipts_screen.dart';
 import 'customers/customers_screen.dart';
@@ -29,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
       appState.fetchRealtimeReceipts();
       appState.fetchRealtimeCustomers();
       appState.fetchAllUsers();
+      appState.checkGpsStatus();
     });
   }
 
@@ -188,27 +190,98 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFDCFCE7),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(width: 6, height: 6, decoration: const BoxDecoration(color: Color(0xFF16A34A), shape: BoxShape.circle)),
-                            const SizedBox(width: 5),
-                            Text(
-                              lang == 'si' ? 'GPS සක්‍රීයයි' : 'GPS Online',
-                              style: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.bold, color: const Color(0xFF15803D)),
+                      InkWell(
+                        onTap: () => _showGpsDialog(context, appState, lang),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: appState.isGpsOnline ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: appState.isGpsOnline ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5),
+                              width: 0.8,
                             ),
-                          ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: appState.isGpsOnline ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                appState.isGpsOnline
+                                    ? (lang == 'si' ? 'GPS සක්‍රීයයි' : 'GPS Online')
+                                    : (lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline'),
+                                style: GoogleFonts.inter(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: appState.isGpsOnline ? const Color(0xFF15803D) : const Color(0xFFB91C1C),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
+
+                // GPS Offline Warning Alert Banner
+                if (!appState.isGpsOnline) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFFCA5A5)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.location_off_rounded, color: Color(0xFFDC2626), size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            lang == 'si'
+                                ? 'දුරකථනයේ GPS අක්‍රියයි. නියම ස්ථානය සටහන් වීමට කරුණාකර GPS සක්‍රීය කරන්න.'
+                                : 'Device GPS is disabled. Please enable GPS so billing locations are recorded accurately.',
+                            style: GoogleFonts.inter(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF991B1B),
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () async {
+                            await LocationService.openLocationSettings();
+                            await appState.checkGpsStatus();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFDC2626),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                          ),
+                          child: Text(
+                            lang == 'si' ? 'සක්‍රීය කරන්න' : 'Enable',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
 
                 // Day-End Lock Warning Banner (Section 3 Requirement)
@@ -622,6 +695,67 @@ class _HomeScreenState extends State<HomeScreen> {
               appState.logout();
             },
             child: Text(LocalizationService.tr('sign_out', lang: lang)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showGpsDialog(BuildContext context, AppState appState, String lang) {
+    final isOnline = appState.isGpsOnline;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              isOnline ? Icons.location_on_rounded : Icons.location_off_rounded,
+              color: isOnline ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isOnline
+                  ? (lang == 'si' ? 'GPS සක්‍රීයයි' : 'GPS Online')
+                  : (lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline'),
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
+        content: Text(
+          isOnline
+              ? (lang == 'si'
+                  ? 'ඔබගේ දුරකථනයේ GPS සක්‍රීයව ක්‍රියාත්මක වේ. බිල්පත් කිරීමේදී නියම ස්ථානය සටහන් වේ.'
+                  : 'Device GPS is active and ready. Billing and field visit locations will be recorded with high accuracy.')
+              : (lang == 'si'
+                  ? 'ඔබගේ දුරකථනයේ GPS අක්‍රිය කර ඇත. බිල්පත් කිරීමේදී නියම ස්ථානය සටහන් වීමට කරුණාකර දුරකථනයේ GPS / Location Services සක්‍රීය කරන්න.'
+                  : 'Device GPS is currently disabled. Please enable Location Services / GPS so receipts and collector stops can be tracked accurately.'),
+          style: GoogleFonts.inter(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          if (!isOnline)
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await LocationService.openLocationSettings();
+                await appState.checkGpsStatus();
+              },
+              icon: const Icon(Icons.settings, size: 16, color: Colors.white),
+              label: Text(
+                lang == 'si' ? 'GPS සක්‍රීය කරන්න' : 'Open Location Settings',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF16A34A),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await appState.checkGpsStatus();
+            },
+            child: Text(lang == 'si' ? 'නැවත පරීක්ෂා කරන්න' : 'Check Status'),
           ),
         ],
       ),

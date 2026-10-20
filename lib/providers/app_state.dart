@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import '../models/customer.dart';
 import '../models/invoice.dart';
@@ -149,17 +150,59 @@ class AppState extends ChangeNotifier {
   List<Invoice> draftInvoices = [];
   bool draftIsAdvancePayment = false;
 
+  // Real-time Device Hardware GPS Status
+  bool isGpsOnline = false;
+  StreamSubscription<ServiceStatus>? _gpsServiceSubscription;
+  Timer? _gpsCheckTimer;
+
   AppState() {
     _initSampleData();
     _startInactivityTimer();
     _autoDetectApiUrl();
+    _initGpsMonitoring();
     fetchRealtimeCustomers();
     fetchRealtimeReceipts();
+  }
+
+  void _initGpsMonitoring() {
+    checkGpsStatus();
+
+    try {
+      _gpsServiceSubscription = Geolocator.getServiceStatusStream().listen((status) {
+        final online = status == ServiceStatus.enabled;
+        if (isGpsOnline != online) {
+          isGpsOnline = online;
+          notifyListeners();
+        }
+      });
+    } catch (_) {}
+
+    // Periodic check every 5 seconds for status or permission toggle
+    _gpsCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      checkGpsStatus();
+    });
+  }
+
+  Future<void> checkGpsStatus() async {
+    try {
+      final available = await LocationService.isGpsAvailable();
+      if (isGpsOnline != available) {
+        isGpsOnline = available;
+        notifyListeners();
+      }
+    } catch (_) {
+      if (isGpsOnline) {
+        isGpsOnline = false;
+        notifyListeners();
+      }
+    }
   }
 
   @override
   void dispose() {
     _inactivityTimer?.cancel();
+    _gpsServiceSubscription?.cancel();
+    _gpsCheckTimer?.cancel();
     super.dispose();
   }
 
@@ -936,8 +979,8 @@ class AppState extends ChangeNotifier {
       isAdvancePayment: items.isEmpty,
       collectorId: collectorId,
       collectorName: collectorName,
-      latitude: loc.latitude != 0.0 ? loc.latitude : 6.927079,
-      longitude: loc.longitude != 0.0 ? loc.longitude : 79.861244,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
       locationAddress: effectiveLocationAddress,
       createdAt: DateTime.now(),
       syncStatus: SyncStatus.synced,

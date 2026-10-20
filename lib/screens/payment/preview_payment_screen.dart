@@ -6,6 +6,7 @@ import '../../providers/app_state.dart';
 import '../../models/receipt.dart';
 import '../../theme/app_theme.dart';
 import '../../services/localization_service.dart';
+import '../../services/location_service.dart';
 import 'receipt_success_screen.dart';
 
 class PreviewPaymentScreen extends StatefulWidget {
@@ -371,8 +372,60 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
   }
 
   void _handleGenerateReceipt() async {
-    setState(() => _isSubmitting = true);
     final appState = Provider.of<AppState>(context, listen: false);
+    final lang = appState.currentLanguage;
+
+    // Verify hardware GPS is active so real location can be recorded
+    final isGpsOn = await LocationService.isGpsAvailable();
+    if (!isGpsOn && mounted) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              const Icon(Icons.location_off_rounded, color: Color(0xFFDC2626)),
+              const SizedBox(width: 8),
+              Text(
+                lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+            ],
+          ),
+          content: Text(
+            lang == 'si'
+                ? 'බිල්පත නිකුත් කරන ස්ථානය නිවැරදිව සටහන් වීමට ඔබගේ දුරකථනයේ GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ. කරුණාකර GPS සක්‍රීය කරන්න.'
+                : 'Device GPS is disabled. GPS must be enabled so the exact billing location can be recorded.',
+            style: GoogleFonts.inter(fontSize: 13.5, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(lang == 'si' ? 'අවලංගු කරන්න' : 'Cancel'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx, true);
+                await LocationService.openLocationSettings();
+              },
+              icon: const Icon(Icons.settings, size: 16, color: Colors.white),
+              label: Text(
+                lang == 'si' ? 'GPS සක්‍රීය කරන්න' : 'Open Location Settings',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF16A34A),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+      await appState.checkGpsStatus();
+    }
+
+    setState(() => _isSubmitting = true);
 
     try {
       final receipt = await appState.confirmAndGenerateReceipt();

@@ -136,32 +136,36 @@ class _VisitedLocationsScreenState extends State<VisitedLocationsScreen> {
   VisitedWaypoint _resolveWaypoint(Receipt receipt, int sequence, int index, int totalCount) {
     double lat = receipt.latitude;
     double lng = receipt.longitude;
+    final bool hasGenuineGps = (lat != 0.0 && lng != 0.0) &&
+        !((lat - 6.927079).abs() < 0.0001 && (lng - 79.861244).abs() < 0.0001);
 
-    // Check if customer name, address, or branch mentions a known town
-    final combinedText = '${receipt.customerName} ${receipt.customerAddress} ${receipt.branch ?? ''} ${receipt.locationAddress}'.toLowerCase();
-    
-    List<double>? townCoords;
-    for (final entry in _townCoordinates.entries) {
-      if (combinedText.contains(entry.key)) {
-        townCoords = entry.value;
-        break;
+    if (!hasGenuineGps) {
+      // Check if customer name, address, or branch mentions a known town
+      final combinedText = '${receipt.customerName} ${receipt.customerAddress} ${receipt.branch ?? ''} ${receipt.locationAddress}'.toLowerCase();
+      
+      List<double>? townCoords;
+      for (final entry in _townCoordinates.entries) {
+        if (combinedText.contains(entry.key)) {
+          townCoords = entry.value;
+          break;
+        }
       }
-    }
 
-    if (townCoords != null) {
-      lat = townCoords[0];
-      lng = townCoords[1];
-    } else if (lat == 0 || lng == 0) {
-      // Default fallback to Sri Lanka central hub
-      lat = 7.4675;
-      lng = 80.6234;
-    }
+      if (townCoords != null) {
+        lat = townCoords[0];
+        lng = townCoords[1];
+      } else if (lat == 0 || lng == 0) {
+        // Default fallback to Sri Lanka central hub
+        lat = 7.4675;
+        lng = 80.6234;
+      }
 
-    // Spread waypoints along a natural travel trajectory so stops don't stack directly on top of each other
-    if (totalCount > 1) {
-      final spreadFactor = 0.0035;
-      lat += (index * spreadFactor * 0.7);
-      lng += math.sin(index * 1.2) * spreadFactor;
+      // Spread approximate town waypoints so stops don't stack directly on top of each other
+      if (totalCount > 1) {
+        final spreadFactor = 0.0035;
+        lat += (index * spreadFactor * 0.7);
+        lng += math.sin(index * 1.2) * spreadFactor;
+      }
     }
 
     return VisitedWaypoint(
