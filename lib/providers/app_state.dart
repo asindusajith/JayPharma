@@ -178,8 +178,10 @@ class AppState extends ChangeNotifier {
 
   void _initGpsMonitoring() {
     checkGpsStatus();
-    // Auto-prompt and connect device hardware GPS on app setup/startup
-    requestAndConnectGps();
+    // Auto-prompt and connect device hardware GPS on app setup/startup (only for collectors, not Admin)
+    if (!isAdmin) {
+      requestAndConnectGps();
+    }
 
     try {
       _gpsServiceSubscription = Geolocator.getServiceStatusStream().listen((status) {
@@ -241,7 +243,7 @@ class AppState extends ChangeNotifier {
 
   // Filtered customers accessible by current user's assigned locations
   List<Customer> get accessibleCustomers {
-    if (currentUser.hasAllLocations) {
+    if (isAdmin || currentUser.hasAllLocations) {
       return _customers;
     }
     return _customers.where((c) {
@@ -256,7 +258,7 @@ class AppState extends ChangeNotifier {
 
   // Receipts filtered by user's assigned locations (or all if ALL locations assigned)
   List<Receipt> get receipts {
-    if (currentUser.hasAllLocations) {
+    if (isAdmin || currentUser.hasAllLocations) {
       return List.unmodifiable(_receipts);
     }
     final scoped = _receipts.where((r) {
@@ -346,8 +348,10 @@ class AppState extends ChangeNotifier {
         fetchRealtimeCustomers(force: true);
         fetchRealtimeReceipts(force: true);
 
-        // Auto-connect device hardware GPS immediately upon login
-        requestAndConnectGps();
+        // Auto-connect device hardware GPS immediately upon login for field collectors (Admin does not require GPS)
+        if (!currentUser.isAdmin) {
+          requestAndConnectGps();
+        }
 
         // Audit Log entry
         _auditLogs.insert(0, AuditLog(
@@ -919,7 +923,7 @@ class AppState extends ChangeNotifier {
 
   // Validation before proceeding to Review Screen (Step 3)
   String? validateDraftPayment() {
-    if (isDayEndFinalized) {
+    if (!isAdmin && isDayEndFinalized) {
       return 'Day-end process has been completed for today. No further payments can be recorded.';
     }
     if (draftCustomer == null) {
@@ -963,31 +967,52 @@ class AppState extends ChangeNotifier {
       throw Exception(validation);
     }
 
-    // Strict GPS validation — mandatory hardware GPS lock required for issuing any bill
-    final gpsCheck = await LocationService.checkStatus();
-    if (!gpsCheck.isReady) {
-      if (!gpsCheck.isServiceEnabled) {
+    // GPS validation — mandatory hardware GPS lock for field collectors; optional for Admin
+    LocationData? loc;
+    if (!isAdmin) {
+      final gpsCheck = await LocationService.checkStatus();
+      if (!gpsCheck.isReady) {
+        if (!gpsCheck.isServiceEnabled) {
+          throw Exception(
+            'බිල්පතක් නිකුත් කිරීමට දුරකථනයේ GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ. කරුණාකර ඔබගේ දුරකථනයේ GPS සක්‍රීය කරන්න. (Device GPS is OFF)',
+          );
+        } else {
+          throw Exception(
+            'බිල්පතක් නිකුත් කිරීමට App එකට Location අවසරය ලබා දිය යුතුය. කරුණාකර Location අවසරය ලබා දෙන්න. (Location permission required)',
+          );
+        }
+      }
+
+      loc = await LocationService.getCurrentLocation();
+      if (!loc.isValid) {
         throw Exception(
-          'බිල්පතක් නිකුත් කිරීමට දුරකථනයේ GPS සක්‍රීය කර තිබීම අනිවාර්ය වේ. කරුණාකර ඔබගේ දුරකථනයේ GPS සක්‍රීය කරන්න. (Device GPS is OFF)',
+          'වලංගු GPS සංඥාවක් ලබා ගැනීමට නොහැකි විය. කරුණාකර GPS සංඥා ලැබෙන ස්ථානයක සිට නැවත උත්සාහ කරන්න.',
         );
-      } else {
-        throw Exception(
-          'බිල්පතක් නිකුත් කිරීමට App එකට Location අවසරය ලබා දිය යුතුය. කරුණාකර Location අවසරය ලබා දෙන්න. (Location permission required)',
-        );
+      }
+    } else {
+      // Admin account: GPS is optional. If available, capture it; otherwise graceful fallback
+      try {
+        if (LocationService.lastKnownLocation != null && LocationService.lastKnownLocation!.isValid) {
+          loc = LocationService.lastKnownLocation;
+        } else {
+          loc = await LocationService.getCurrentLocation().timeout(const Duration(seconds: 2));
+        }
+      } catch (_) {
+        loc = null;
       }
     }
 
-    final loc = await LocationService.getCurrentLocation();
-    if (!loc.isValid) {
-      throw Exception(
-        'වලංගු GPS සංඥාවක් ලබා ගැනීමට නොහැකි විය. කරුණාකර GPS සංඥා ලැබෙන ස්ථානයක සිට නැවත උත්සාහ කරන්න.',
-      );
-    }
-    final effectiveLocationAddress = (loc.address.isNotEmpty)
+    final effectiveLat = (loc != null && loc.isValid)
+        ? loc.latitude
+        : 6.927079;
+    final effectiveLng = (loc != null && loc.isValid)
+        ? loc.longitude
+        : 79.861244;
+    final effectiveLocationAddress = (loc != null && loc.address.isNotEmpty)
         ? loc.address
         : (draftCustomer?.address.isNotEmpty == true
             ? draftCustomer!.address
-            : 'Galle Road, Colombo 03, Western Province, Sri Lanka');
+            : 'Admin Head Office / Field Operations');
     final effectiveBranch = (draftBranch != null && draftBranch!.trim().isNotEmpty)
         ? draftBranch!.trim()
         : (draftCustomer?.town.isNotEmpty == true
@@ -1032,8 +1057,8 @@ class AppState extends ChangeNotifier {
       isAdvancePayment: items.isEmpty,
       collectorId: collectorId,
       collectorName: collectorName,
-      latitude: loc.latitude,
-      longitude: loc.longitude,
+      latitude: effectiveLat,
+      longitude: effectiveLng,
       locationAddress: effectiveLocationAddress,
       createdAt: DateTime.now(),
       syncStatus: SyncStatus.synced,

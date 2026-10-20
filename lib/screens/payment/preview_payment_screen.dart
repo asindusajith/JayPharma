@@ -318,8 +318,8 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // GPS Mandatory Warning Banner
-                if (!appState.isGpsOnline) ...[
+                // GPS Mandatory Warning Banner (Hidden for Admin accounts)
+                if (!appState.isAdmin && !appState.isGpsOnline) ...[
                   Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -389,7 +389,7 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                 ElevatedButton(
                   onPressed: _isSubmitting ? null : _handleGenerateReceipt,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: appState.isGpsOnline ? AppTheme.primaryNavy : const Color(0xFF64748B),
+                    backgroundColor: (appState.isAdmin || appState.isGpsOnline) ? AppTheme.primaryNavy : const Color(0xFF64748B),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: _isSubmitting
@@ -443,10 +443,11 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
     final appState = Provider.of<AppState>(context, listen: false);
     final lang = appState.currentLanguage;
 
-    await appState.checkGpsStatus();
+    if (!appState.isAdmin) {
+      await appState.checkGpsStatus();
 
-    // STRICT GPS HARD-BLOCK: Cannot issue bill without active GPS
-    if (!appState.isGpsOnline) {
+      // STRICT GPS HARD-BLOCK: Cannot issue bill without active GPS (Admin accounts bypassed)
+      if (!appState.isGpsOnline) {
       if (mounted) {
         final isPermNeeded = appState.isLocationPermissionNeeded;
         await showDialog(
@@ -592,6 +593,7 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
       }
       return; // STRICT HARD-BLOCK!
     }
+  }
 
     setState(() => _isSubmitting = true);
 

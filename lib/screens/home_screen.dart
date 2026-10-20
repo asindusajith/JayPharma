@@ -31,7 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
       appState.fetchRealtimeReceipts();
       appState.fetchRealtimeCustomers();
       appState.fetchAllUsers();
-      if (!appState.isGpsOnline) {
+      if (!appState.isAdmin && !appState.isGpsOnline) {
         appState.requestAndConnectGps();
       }
     });
@@ -199,14 +199,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: appState.isGpsOnline
+                            color: (appState.isAdmin || appState.isGpsOnline)
                                 ? const Color(0xFFDCFCE7)
                                 : (appState.isLocationPermissionNeeded
                                     ? const Color(0xFFFEF3C7)
                                     : const Color(0xFFFEE2E2)),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: appState.isGpsOnline
+                              color: (appState.isAdmin || appState.isGpsOnline)
                                   ? const Color(0xFF86EFAC)
                                   : (appState.isLocationPermissionNeeded
                                       ? const Color(0xFFFCD34D)
@@ -221,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 width: 7,
                                 height: 7,
                                 decoration: BoxDecoration(
-                                  color: appState.isGpsOnline
+                                  color: (appState.isAdmin || appState.isGpsOnline)
                                       ? const Color(0xFF16A34A)
                                       : (appState.isLocationPermissionNeeded
                                           ? const Color(0xFFD97706)
@@ -231,15 +231,19 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                               const SizedBox(width: 5),
                               Text(
-                                appState.isGpsOnline
-                                    ? (lang == 'si' ? 'GPS සක්‍රීයයි' : 'GPS Online')
-                                    : (appState.isLocationPermissionNeeded
-                                        ? (lang == 'si' ? 'අවසරය අවශ්‍යයි' : 'Permission Req.')
-                                        : (lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline')),
+                                appState.isAdmin
+                                    ? (appState.isGpsOnline
+                                        ? (lang == 'si' ? 'GPS සක්‍රීයයි' : 'GPS Online')
+                                        : (lang == 'si' ? 'Admin ප්‍රවේශය' : 'Admin Mode'))
+                                    : (appState.isGpsOnline
+                                        ? (lang == 'si' ? 'GPS සක්‍රීයයි' : 'GPS Online')
+                                        : (appState.isLocationPermissionNeeded
+                                            ? (lang == 'si' ? 'අවසරය අවශ්‍යයි' : 'Permission Req.')
+                                            : (lang == 'si' ? 'GPS අක්‍රියයි' : 'GPS Offline'))),
                                 style: GoogleFonts.inter(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.bold,
-                                  color: appState.isGpsOnline
+                                  color: (appState.isAdmin || appState.isGpsOnline)
                                       ? const Color(0xFF15803D)
                                       : (appState.isLocationPermissionNeeded
                                           ? const Color(0xFFB45309)
@@ -254,8 +258,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
 
-                // GPS Offline / Permission Alert Banner
-                if (!appState.isGpsOnline) ...[
+                // GPS Offline / Permission Alert Banner (Hidden for Admin accounts)
+                if (!appState.isAdmin && !appState.isGpsOnline) ...[
                   const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -339,8 +343,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
                 const SizedBox(height: 14),
 
-                // Day-End Lock Warning Banner (Section 3 Requirement)
-                if (appState.isDayEndFinalized) ...[
+                // Day-End Lock Warning Banner (Section 3 Requirement - Hidden for Admin)
+                if (!appState.isAdmin && appState.isDayEndFinalized) ...[
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -513,10 +517,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   subtitle: LocalizationService.tr('accept_payment_sub', lang: lang),
                   icon: Icons.add_circle,
                   color: AppTheme.primaryBlue,
-                  badge: appState.isDayEndFinalized
+                  badge: (!appState.isAdmin && appState.isDayEndFinalized)
                       ? LocalizationService.tr('day_end_locked', lang: lang)
-                      : (!appState.isGpsOnline ? (lang == 'si' ? 'GPS අවශ්‍යයි' : 'GPS Required') : null),
-                  badgeColor: appState.isDayEndFinalized ? AppTheme.dangerRed : const Color(0xFFDC2626),
+                      : (!appState.isAdmin && !appState.isGpsOnline ? (lang == 'si' ? 'GPS අවශ්‍යයි' : 'GPS Required') : null),
+                  badgeColor: (!appState.isAdmin && appState.isDayEndFinalized) ? AppTheme.dangerRed : const Color(0xFFDC2626),
                   onTap: () => _handleAcceptPaymentTap(context, appState, lang),
                 ),
                 const SizedBox(height: 10),
@@ -750,17 +754,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleAcceptPaymentTap(BuildContext context, AppState appState, String lang) async {
-    if (appState.isDayEndFinalized) {
+    if (!appState.isAdmin && appState.isDayEndFinalized) {
       _showDayEndLockedDialog(context, lang);
       return;
     }
 
-    await appState.checkGpsStatus();
+    if (!appState.isAdmin) {
+      await appState.checkGpsStatus();
 
-    if (!appState.isGpsOnline) {
-      if (!context.mounted) return;
-      _showGpsRequiredForBillingDialog(context, appState, lang);
-      return;
+      if (!appState.isGpsOnline) {
+        if (!context.mounted) return;
+        _showGpsRequiredForBillingDialog(context, appState, lang);
+        return;
+      }
     }
 
     if (!context.mounted) return;
