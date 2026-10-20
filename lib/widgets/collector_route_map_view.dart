@@ -1,10 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/receipt.dart';
-import '../theme/app_theme.dart';
 
 class VisitedWaypoint {
   final int sequence; // 1, 2, 3...

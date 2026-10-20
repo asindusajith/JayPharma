@@ -30,7 +30,9 @@ class _HomeScreenState extends State<HomeScreen> {
       appState.fetchRealtimeReceipts();
       appState.fetchRealtimeCustomers();
       appState.fetchAllUsers();
-      appState.checkGpsStatus();
+      if (!appState.isGpsOnline) {
+        appState.requestAndConnectGps();
+      }
     });
   }
 
@@ -300,14 +302,16 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(width: 8),
                         ElevatedButton(
-                          onPressed: () async {
-                            if (appState.isLocationPermissionNeeded) {
-                              await appState.requestGpsPermission();
-                            } else {
-                              await LocationService.openLocationSettings();
-                            }
-                            await appState.checkGpsStatus();
-                          },
+                          onPressed: appState.isConnectingGps
+                              ? null
+                              : () async {
+                                  if (appState.isLocationPermissionNeeded) {
+                                    await appState.requestAndConnectGps();
+                                  } else {
+                                    await LocationService.openLocationSettings();
+                                    await appState.requestAndConnectGps();
+                                  }
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: appState.isLocationPermissionNeeded
                                 ? const Color(0xFFD97706)
@@ -317,12 +321,18 @@ class _HomeScreenState extends State<HomeScreen> {
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                           ),
-                          child: Text(
-                            appState.isLocationPermissionNeeded
-                                ? (lang == 'si' ? 'අවසර දෙන්න' : 'Allow')
-                                : (lang == 'si' ? 'සක්‍රීය කරන්න' : 'Enable'),
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
+                          child: appState.isConnectingGps
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : Text(
+                                  appState.isLocationPermissionNeeded
+                                      ? (lang == 'si' ? 'අවසර දෙන්න' : 'Allow')
+                                      : (lang == 'si' ? 'සක්‍රීය කරන්න' : 'Enable'),
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
                         ),
                       ],
                     ),
@@ -797,11 +807,11 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () async {
               Navigator.pop(ctx);
               if (appState.isLocationPermissionNeeded) {
-                await appState.requestGpsPermission();
+                await appState.requestAndConnectGps();
               } else {
                 await LocationService.openLocationSettings();
+                await appState.requestAndConnectGps();
               }
-              await appState.checkGpsStatus();
             },
             icon: Icon(
               appState.isLocationPermissionNeeded ? Icons.check_circle : Icons.location_on,
@@ -873,11 +883,11 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () async {
                 Navigator.pop(ctx);
                 if (isPermNeeded) {
-                  await appState.requestGpsPermission();
+                  await appState.requestAndConnectGps();
                 } else {
                   await LocationService.openLocationSettings();
+                  await appState.requestAndConnectGps();
                 }
-                await appState.checkGpsStatus();
               },
               icon: Icon(isPermNeeded ? Icons.check_circle : Icons.settings, size: 16, color: Colors.white),
               label: Text(

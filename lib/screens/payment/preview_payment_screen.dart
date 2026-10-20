@@ -357,11 +357,11 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                         ElevatedButton(
                           onPressed: () async {
                             if (appState.isLocationPermissionNeeded) {
-                              await appState.requestGpsPermission();
+                              await appState.requestAndConnectGps();
                             } else {
                               await LocationService.openLocationSettings();
+                              await appState.requestAndConnectGps();
                             }
-                            await appState.checkGpsStatus();
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: appState.isLocationPermissionNeeded ? const Color(0xFFD97706) : const Color(0xFFDC2626),
@@ -480,11 +480,11 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                 onPressed: () async {
                   Navigator.pop(ctx);
                   if (isPermNeeded) {
-                    await appState.requestGpsPermission();
+                    await appState.requestAndConnectGps();
                   } else {
                     await LocationService.openLocationSettings();
+                    await appState.requestAndConnectGps();
                   }
-                  await appState.checkGpsStatus();
                 },
                 icon: Icon(isPermNeeded ? Icons.check_circle : Icons.location_on, size: 16, color: Colors.white),
                 label: Text(

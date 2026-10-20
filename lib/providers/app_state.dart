@@ -174,8 +174,12 @@ class AppState extends ChangeNotifier {
     fetchRealtimeReceipts();
   }
 
+  bool isConnectingGps = false;
+
   void _initGpsMonitoring() {
     checkGpsStatus();
+    // Auto-prompt and connect device hardware GPS on app setup/startup
+    requestAndConnectGps();
 
     try {
       _gpsServiceSubscription = Geolocator.getServiceStatusStream().listen((status) {
@@ -201,12 +205,26 @@ class AppState extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> requestGpsPermission() async {
+  /// Actively connect to device hardware GPS (prompts permission, gets real coordinates)
+  Future<void> requestAndConnectGps() async {
+    if (isConnectingGps) return;
+    isConnectingGps = true;
+    notifyListeners();
+
     try {
-      final status = await LocationService.requestPermission();
+      await LocationService.requestAndConnectGps();
+      final status = await LocationService.checkStatus();
       gpsStatus = status;
+    } catch (e) {
+      debugPrint('requestAndConnectGps failed: $e');
+    } finally {
+      isConnectingGps = false;
       notifyListeners();
-    } catch (_) {}
+    }
+  }
+
+  Future<void> requestGpsPermission() async {
+    await requestAndConnectGps();
   }
 
   @override
@@ -325,6 +343,9 @@ class AppState extends ChangeNotifier {
         fetchAllUsers(force: true);
         fetchRealtimeCustomers(force: true);
         fetchRealtimeReceipts(force: true);
+
+        // Auto-connect device hardware GPS immediately upon login
+        requestAndConnectGps();
 
         // Audit Log entry
         _auditLogs.insert(0, AuditLog(
