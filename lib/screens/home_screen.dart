@@ -14,6 +14,7 @@ import 'customers/customers_screen.dart';
 import 'day_end/day_end_screen.dart';
 import 'dashboard/dashboard_screen.dart';
 import 'settings/settings_screen.dart';
+import '../widgets/day_start_freeze_overlay.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -33,6 +34,9 @@ class _HomeScreenState extends State<HomeScreen> {
       appState.fetchAllUsers();
       if (!appState.isAdmin && !appState.isGpsOnline) {
         appState.requestAndConnectGps();
+      }
+      if (!appState.isAdmin) {
+        appState.checkDayEndStatus();
       }
     });
   }
@@ -89,8 +93,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
+      body: Stack(
+        children: [
+          SafeArea(
+            child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 600),
@@ -606,8 +612,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
-    );
-  }
+      if (!appState.isAdmin && appState.isDayEndFinalized)
+        const DayStartFreezeOverlay(),
+    ],
+  ),
+);
+}
 
   Widget _buildActionCard(
     BuildContext context, {

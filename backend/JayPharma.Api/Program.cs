@@ -166,6 +166,11 @@ app.MapPost("/api/users", async (CreateUserRequest req, IMemoryCache cache) =>
         ? ("COL-" + req.Username.Trim().ToUpper()) 
         : req.CollectorId.Trim().ToUpper();
 
+    if (colId.Length > 20)
+    {
+        return Results.BadRequest(new { error = "User ID / Collector ID cannot exceed 20 characters." });
+    }
+
     // Check if username or collectorId already exists
     using (var checkCmd = conn.CreateCommand())
     {
@@ -624,8 +629,12 @@ app.MapGet("/api/receipts/verify-unique/{receiptNo}", async (string receiptNo) =
 });
 
 // 5b. Get Next Suggested Manual Receipt Number
-app.MapGet("/api/receipts/next-number", async () =>
+app.MapGet("/api/receipts/next-number", async (string? prefix) =>
 {
+    string p = string.IsNullOrWhiteSpace(prefix) ? "MR" : prefix.Trim().ToUpper();
+    if (p.StartsWith("COL-") && p.Length > 4) p = p.Substring(4).Trim();
+    if (string.IsNullOrWhiteSpace(p)) p = "MR";
+
     int maxNum = 26450;
     try
     {
@@ -660,7 +669,7 @@ app.MapGet("/api/receipts/next-number", async () =>
     catch { }
 
     int nextNum = maxNum + 1;
-    string formatted = $"MR-{nextNum.ToString().PadLeft(6, '0')}";
+    string formatted = $"{p}-{nextNum.ToString().PadLeft(6, '0')}";
     return Results.Ok(new { nextReceiptNo = formatted });
 });
 
@@ -1037,12 +1046,43 @@ app.MapPost("/api/dayend/finalize", async (DayEndFinalizeRequest req) =>
     using var conn = new SqlConnection(connectionString);
     await conn.OpenAsync();
 
+    // 1. Resolve actual CollectorId from Collectors table or ensure exists to satisfy FK
+    string actualCollectorId = req.CollectorId.Trim();
+    using (var findColCmd = conn.CreateCommand())
+    {
+        findColCmd.CommandText = @"
+            SELECT TOP 1 CollectorId FROM Collectors 
+            WHERE LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId))) 
+               OR LOWER(LTRIM(RTRIM(Username))) = LOWER(LTRIM(RTRIM(@cId)))
+               OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))";
+        findColCmd.Parameters.AddWithValue("@cId", req.CollectorId.Trim());
+        var found = await findColCmd.ExecuteScalarAsync();
+        if (found != null && found != DBNull.Value)
+        {
+            actualCollectorId = found.ToString()!;
+        }
+        else
+        {
+            using var insCmd = conn.CreateCommand();
+            insCmd.CommandText = @"
+                IF NOT EXISTS (SELECT 1 FROM Collectors WHERE CollectorId = @cId)
+                BEGIN
+                    INSERT INTO Collectors (CollectorId, Username, PasswordHash, FullName, Branch, IsActive, CreatedAt)
+                    VALUES (@cId, @cId, 'AUTOGEN', @cName, 'Jay Pharma', 1, GETDATE());
+                END";
+            insCmd.Parameters.AddWithValue("@cId", actualCollectorId);
+            insCmd.Parameters.AddWithValue("@cName", req.CollectorName);
+            await insCmd.ExecuteNonQueryAsync();
+        }
+    }
+
     using var cmd = conn.CreateCommand();
     cmd.CommandText = @"
         IF EXISTS (SELECT 1 FROM DayEndSummaries WHERE CollectorId = @cId AND SummaryDate = @sDate)
         BEGIN
             UPDATE DayEndSummaries 
-            SET IsFinalized = 1, FinalizedAt = GETDATE(), CashierNotes = @notes
+            SET IsFinalized = 1, FinalizedAt = GETDATE(), CashierNotes = @notes,
+                TotalCash = @cash, TotalCheque = @chq, TotalIncome = @income, TotalReceiptsCount = @count
             WHERE CollectorId = @cId AND SummaryDate = @sDate;
         END
         ELSE
@@ -1054,7 +1094,7 @@ app.MapPost("/api/dayend/finalize", async (DayEndFinalizeRequest req) =>
         END";
 
     cmd.Parameters.AddWithValue("@sDate", req.Date.Date);
-    cmd.Parameters.AddWithValue("@cId", req.CollectorId);
+    cmd.Parameters.AddWithValue("@cId", actualCollectorId);
     cmd.Parameters.AddWithValue("@cName", req.CollectorName);
     cmd.Parameters.AddWithValue("@cash", req.TotalCash);
     cmd.Parameters.AddWithValue("@chq", req.TotalCheque);
@@ -1064,12 +1104,229 @@ app.MapPost("/api/dayend/finalize", async (DayEndFinalizeRequest req) =>
 
     await cmd.ExecuteNonQueryAsync();
 
-    return Results.Ok(new { success = true, message = "Day-End statement finalized and locked for today." });
+    return Results.Ok(new { success = true, collectorId = actualCollectorId, message = "Day-End statement finalized and locked for today." });
+});
+
+// 7b. Check Collector Day-End Status (Checks if previously finalized and waiting for Day Start)
+app.MapGet("/api/dayend/status/{collectorId}", async (string collectorId) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT TOP 1 IsFinalized, FinalizedAt, SummaryDate 
+            FROM DayEndSummaries 
+            WHERE CollectorId IN (
+                SELECT CollectorId FROM Collectors 
+                WHERE LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId))) 
+                   OR LOWER(LTRIM(RTRIM(Username))) = LOWER(LTRIM(RTRIM(@cId)))
+                   OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))
+            ) OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId)))
+              OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))
+            ORDER BY SummaryDate DESC, Id DESC";
+        cmd.Parameters.AddWithValue("@cId", collectorId.Trim());
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            bool isFinalized = reader["IsFinalized"] != DBNull.Value && Convert.ToBoolean(reader["IsFinalized"]);
+            DateTime? finalizedAt = reader["FinalizedAt"] != DBNull.Value ? Convert.ToDateTime(reader["FinalizedAt"]) : (DateTime?)null;
+            DateTime? summaryDate = reader["SummaryDate"] != DBNull.Value ? Convert.ToDateTime(reader["SummaryDate"]) : (DateTime?)null;
+            return Results.Ok(new 
+            { 
+                isFinalized = isFinalized, 
+                finalizedAt = finalizedAt != null ? finalizedAt.Value.ToString("o") : null,
+                summaryDate = summaryDate != null ? summaryDate.Value.ToString("yyyy-MM-dd") : null
+            });
+        }
+        return Results.Ok(new { isFinalized = false, finalizedAt = (string?)null, summaryDate = (string?)null });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[GET /api/dayend/status Error]: {ex.Message}");
+        return Results.Ok(new { isFinalized = false, finalizedAt = (string?)null, error = ex.Message });
+    }
+});
+
+// 7c. Day Start Action (Unlocks App & Clears Finalized Flag for Collector)
+app.MapPost("/api/dayend/start", async (DayStartRequest req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            UPDATE DayEndSummaries 
+            SET IsFinalized = 0 
+            WHERE CollectorId IN (
+                SELECT CollectorId FROM Collectors 
+                WHERE LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId))) 
+                   OR LOWER(LTRIM(RTRIM(Username))) = LOWER(LTRIM(RTRIM(@cId)))
+                   OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))
+            ) OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId)))
+              OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))";
+        cmd.Parameters.AddWithValue("@cId", req.CollectorId.Trim());
+        int rows = await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true, updatedRows = rows, message = "Day started successfully. Normal access restored." });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[POST /api/dayend/start Error]: {ex.Message}");
+        return Results.Problem(ex.Message);
+    }
+});
+
+// 8. OTP Generation & Verification for Protected Operations (POS Statement Print for Normal Users)
+app.MapPost("/api/otp/generate", async (GenerateOtpRequest req) =>
+{
+    var otp = Random.Shared.Next(100000, 999999).ToString();
+
+    try
+    {
+        using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            IF EXISTS (SELECT 1 FROM LastGeneratedOtp WHERE Id = 1)
+            BEGIN
+                UPDATE LastGeneratedOtp 
+                SET OtpCode = @otp, 
+                    CollectorId = @collectorId, 
+                    CustomerCode = @customerCode, 
+                    CustomerName = @customerName, 
+                    GeneratedAt = GETDATE(), 
+                    ExpiresAt = DATEADD(minute, 15, GETDATE()), 
+                    IsUsed = 0, 
+                    UsedAt = NULL
+                WHERE Id = 1;
+            END
+            ELSE
+            BEGIN
+                INSERT INTO LastGeneratedOtp (Id, OtpCode, CollectorId, CustomerCode, CustomerName, GeneratedAt, ExpiresAt, IsUsed)
+                VALUES (1, @otp, @collectorId, @customerCode, @customerName, GETDATE(), DATEADD(minute, 15, GETDATE()), 0);
+            END";
+        cmd.Parameters.AddWithValue("@otp", otp);
+        cmd.Parameters.AddWithValue("@collectorId", (object?)req.CollectorId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@customerCode", (object?)req.CustomerCode ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@customerName", (object?)req.CustomerName ?? DBNull.Value);
+
+        await cmd.ExecuteNonQueryAsync();
+
+        return Results.Ok(new 
+        { 
+            success = true, 
+            message = "OTP generated successfully and saved to LastGeneratedOtp.",
+            otpCode = otp, // returned for display/testing until SMS gateway is connected
+            expiresInMinutes = 15
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Failed to save OTP: {ex.Message}");
+    }
+});
+
+app.MapPost("/api/otp/verify", async (VerifyOtpRequest req) =>
+{
+    if (string.IsNullOrWhiteSpace(req.OtpCode))
+    {
+        return Results.BadRequest(new { success = false, message = "OTP code cannot be empty." });
+    }
+
+    try
+    {
+        using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT OtpCode, ExpiresAt, IsUsed 
+            FROM LastGeneratedOtp 
+            WHERE Id = 1";
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+        {
+            return Results.BadRequest(new { success = false, message = "No OTP has been generated." });
+        }
+
+        var savedOtp = reader["OtpCode"].ToString();
+        var expiresAt = Convert.ToDateTime(reader["ExpiresAt"]);
+        var isUsed = Convert.ToBoolean(reader["IsUsed"]);
+        reader.Close();
+
+        if (isUsed)
+        {
+            return Results.BadRequest(new { success = false, message = "This OTP has already been used. Please request a new one." });
+        }
+
+        if (DateTime.UtcNow > expiresAt.ToUniversalTime())
+        {
+            return Results.BadRequest(new { success = false, message = "OTP has expired. Please request a new one." });
+        }
+
+        if (savedOtp != req.OtpCode.Trim())
+        {
+            return Results.BadRequest(new { success = false, message = "Invalid OTP code entered. Please try again." });
+        }
+
+        // Mark as used
+        using var markCmd = conn.CreateCommand();
+        markCmd.CommandText = "UPDATE LastGeneratedOtp SET IsUsed = 1, UsedAt = GETDATE() WHERE Id = 1";
+        await markCmd.ExecuteNonQueryAsync();
+
+        return Results.Ok(new { success = true, message = "OTP verified successfully." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Verification error: {ex.Message}");
+    }
+});
+
+app.MapGet("/api/otp/last", async () =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT Id, OtpCode, CollectorId, CustomerCode, CustomerName, GeneratedAt, ExpiresAt, IsUsed, UsedAt 
+            FROM LastGeneratedOtp 
+            WHERE Id = 1";
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            return Results.Ok(new
+            {
+                otpCode = reader["OtpCode"].ToString(),
+                collectorId = reader["CollectorId"]?.ToString(),
+                customerCode = reader["CustomerCode"]?.ToString(),
+                customerName = reader["CustomerName"]?.ToString(),
+                generatedAt = Convert.ToDateTime(reader["GeneratedAt"]),
+                expiresAt = Convert.ToDateTime(reader["ExpiresAt"]),
+                isUsed = Convert.ToBoolean(reader["IsUsed"]),
+                usedAt = reader["UsedAt"] != DBNull.Value ? Convert.ToDateTime(reader["UsedAt"]) : (DateTime?)null
+            });
+        }
+        return Results.NotFound(new { message = "No OTP generated yet." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
 });
 
 app.Run();
 
 // DTO Models
+record GenerateOtpRequest(string CollectorId, string? CustomerCode, string? CustomerName);
+record VerifyOtpRequest(string CollectorId, string OtpCode);
 record LoginRequest(string Username, string Password);
 record CreateReceiptDto(
     string ManualReceiptNo,
@@ -1109,6 +1366,10 @@ record DayEndFinalizeRequest(
     double TotalIncome,
     int TotalReceiptsCount,
     string? CashierNotes
+);
+
+record DayStartRequest(
+    string CollectorId
 );
 
 record CreateUserRequest(

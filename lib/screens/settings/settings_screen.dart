@@ -7,6 +7,7 @@ import '../../models/app_user.dart';
 import '../../models/customer.dart';
 import '../../theme/app_theme.dart';
 import '../../services/localization_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -117,6 +118,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                           ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // App Version & Auto-Update Card
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(color: Color(0xFFE2E8F0)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF0FDF4),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.system_update_rounded, color: Color(0xFF16A34A), size: 22),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    lang == 'si' ? 'යෙදුම් අනුවාදය සහ යාවත්කාලීන' : 'App Version & Auto Updates',
+                                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                                  ),
+                                  Text(
+                                    'Installed: v1.0.1 (Build 2) • GitHub Auto CI/CD',
+                                    style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          lang == 'si'
+                              ? 'Git push කළ පසු නවතම APK එක GitHub මඟින් ස්වයංක්‍රීයව Build වේ. පහත බටනය මඟින් නවතම APK එක ඕනෑම වේලාවක බාගත කර ස්ථාපනය කළ හැක.'
+                              : 'Whenever code is pushed to GitHub, the latest release APK is automatically compiled in the cloud. Tap below to download the latest APK update.',
+                          style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textDark, height: 1.4),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.download_rounded, size: 18),
+                            label: Text(
+                              lang == 'si' ? 'නවතම APK එක බාගත කරන්න (Download Latest)' : 'Download Latest APK Update',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF16A34A),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () async {
+                              final uri = Uri.parse('https://github.com/asindusajith/JayPharma/releases/latest/download/app-release.apk');
+                              try {
+                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Could not open download link: $e')),
+                                  );
+                                }
+                              }
+                            },
+                          ),
                         ),
                       ],
                     ),
@@ -572,6 +655,7 @@ class _CreateUserDialog extends StatefulWidget {
 
 class _CreateUserDialogState extends State<_CreateUserDialog> {
   final _fullNameController = TextEditingController();
+  final _collectorIdController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -596,6 +680,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
   @override
   void dispose() {
     _fullNameController.dispose();
+    _collectorIdController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
     _phoneController.dispose();
@@ -605,6 +690,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
 
   Future<void> _submit() async {
     final fullName = _fullNameController.text.trim();
+    final collectorId = _collectorIdController.text.trim();
     final username = _usernameController.text.trim();
     final password = _passwordController.text.trim();
 
@@ -612,6 +698,12 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
 
     if (fullName.isEmpty) {
       setState(() => _errorMessage = isSi ? 'කරුණාකර සම්පූර්ණ නම ඇතුළත් කරන්න.' : 'Please enter user full name.');
+      return;
+    }
+    if (collectorId.isNotEmpty && collectorId.length > 20) {
+      setState(() => _errorMessage = isSi
+          ? 'පරිශීලක ID / කේතය උපරිම අක්ෂර 20ක් විය යුතුය.'
+          : 'User ID / Code cannot exceed 20 characters.');
       return;
     }
     if (username.isEmpty) {
@@ -648,13 +740,16 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
         branch: 'Jay Pharma',
         accessLevel: _accessLevel,
         assignedLocations: assignedLocationsString,
+        collectorId: collectorId.isNotEmpty ? collectorId : null,
       );
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isSi ? 'පරිශීලක $fullName සාර්ථකව සාදන ලදී!' : 'User $fullName ($username) created successfully!'),
+            content: Text(isSi
+                ? 'පරිශීලක $fullName ${collectorId.isNotEmpty ? "($collectorId)" : ""} සාර්ථකව සාදන ලදී!'
+                : 'User $fullName ${collectorId.isNotEmpty ? "($collectorId)" : "($username)"} created successfully!'),
             backgroundColor: AppTheme.successGreen,
           ),
         );
@@ -770,6 +865,22 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                           labelText: '${LocalizationService.tr('full_name', lang: lang)} *',
                           prefixIcon: const Icon(Icons.badge_outlined, size: 20),
                           hintText: isSi ? 'සුනිල් පෙරේරා' : 'Sunil Perera',
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // User ID / Rep Code (e.g. XXX, 01122)
+                      TextField(
+                        controller: _collectorIdController,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: InputDecoration(
+                          labelText: LocalizationService.tr('collector_user_id', lang: lang),
+                          prefixIcon: const Icon(Icons.pin_outlined, size: 20),
+                          hintText: LocalizationService.tr('collector_user_id_hint', lang: lang),
+                          helperText: LocalizationService.tr('collector_user_id_helper', lang: lang),
+                          helperStyle: GoogleFonts.inter(fontSize: 10.5, color: AppTheme.textMuted),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                         ),

@@ -289,10 +289,17 @@ class ThermalReceiptView extends StatelessWidget {
                 ),
                 const Divider(color: Color(0xFF94A3B8), thickness: 1, height: 14),
 
-                if (receipt.comments.isNotEmpty) ...[
-                  Text(
-                    'Notes: ${receipt.comments}',
-                    style: GoogleFonts.inter(fontSize: 9, color: const Color(0xFF64748B)),
+                if (receipt.comments.trim().isNotEmpty) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Remarks: ${receipt.comments.trim()}',
+                      style: GoogleFonts.inter(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF1E293B),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 8),
                 ],

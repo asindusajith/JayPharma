@@ -40,17 +40,29 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
     final currency = NumberFormat('#,##0.00', 'en_US');
     final dateFormat = DateFormat('dd/MM/yyyy');
 
-    final startOfFrom = DateTime(_fromDate.year, _fromDate.month, _fromDate.day);
-    final endOfTo = DateTime(_toDate.year, _toDate.month, _toDate.day, 23, 59, 59);
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final todayEnd = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
+    // Normal users can only view Today's receipts; Admins can use custom date ranges
+    final startOfFrom = appState.isAdmin
+        ? DateTime(_fromDate.year, _fromDate.month, _fromDate.day)
+        : todayStart;
+    final endOfTo = appState.isAdmin
+        ? DateTime(_toDate.year, _toDate.month, _toDate.day, 23, 59, 59)
+        : todayEnd;
 
     final filteredReceipts = appState.receipts.where((r) {
-      final matchesScope = appState.currentUser.hasAllLocations ||
-          r.collectorId == appState.collectorId ||
-          appState.currentUser.canAccessCustomer(
-            code: r.customerCode,
-            name: r.customerName,
-            address: r.customerAddress,
-          );
+      // Normal collectors can ONLY see receipts they personally issued; Admins can view all within assigned locations
+      final matchesScope = appState.isAdmin
+          ? (appState.currentUser.hasAllLocations ||
+              appState.currentUser.canAccessCustomer(
+                code: r.customerCode,
+                name: r.customerName,
+                address: r.customerAddress,
+              ))
+          : (r.collectorId.trim().toLowerCase() == appState.collectorId.trim().toLowerCase() ||
+             r.collectorId.trim().toLowerCase() == appState.currentUser.username.trim().toLowerCase());
 
       final matchesDate = r.createdAt.isAfter(startOfFrom.subtract(const Duration(seconds: 1))) &&
           r.createdAt.isBefore(endOfTo.add(const Duration(seconds: 1)));
@@ -86,80 +98,150 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
               color: Colors.white,
               child: Column(
                 children: [
-                  Row(
-                    children: [
-                      // From Date
-                      Expanded(
-                        child: InkWell(
-                          onTap: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              initialDate: _fromDate,
-                              firstDate: DateTime(2025),
-                              lastDate: DateTime.now().add(const Duration(days: 1)),
-                            );
-                            if (picked != null) {
-                              setState(() {
-                                _fromDate = picked;
-                                if (_fromDate.isAfter(_toDate)) _toDate = _fromDate;
-                              });
-                            }
-                          },
-                          child: InputDecorator(
-                            decoration: InputDecoration(
-                              labelText: isSi ? 'සිට දිනය' : 'From Date',
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                              prefixIcon: const Icon(Icons.date_range, size: 18),
-                            ),
-                            child: Text(
-                              dateFormat.format(_fromDate),
-                              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // To Date
-                      Expanded(
-                        child: InkWell(
-                          onTap: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              initialDate: _toDate,
-                              firstDate: _fromDate,
-                              lastDate: DateTime.now().add(const Duration(days: 1)),
-                            );
-                            if (picked != null) {
-                              setState(() => _toDate = picked);
-                            }
-                          },
-                          child: InputDecorator(
-                            decoration: InputDecoration(
-                              labelText: isSi ? 'දක්වා දිනය' : 'To Date',
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                              prefixIcon: const Icon(Icons.event, size: 18),
-                            ),
-                            child: Text(
-                              dateFormat.format(_toDate),
-                              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+                  // Admins have access to custom date range; Normal users are locked to Today only
+                  if (appState.isAdmin)
+                    Row(
+                      children: [
+                        // From Date
+                        Expanded(
+                          child: InkWell(
+                            onTap: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: _fromDate,
+                                firstDate: DateTime(2025),
+                                lastDate: DateTime.now().add(const Duration(days: 1)),
+                              );
+                              if (picked != null) {
+                                setState(() {
+                                  _fromDate = picked;
+                                  if (_fromDate.isAfter(_toDate)) _toDate = _fromDate;
+                                });
+                              }
+                            },
+                            child: InputDecorator(
+                              decoration: InputDecoration(
+                                labelText: isSi ? 'සිට දිනය' : 'From Date',
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                prefixIcon: const Icon(Icons.date_range, size: 18),
+                              ),
+                              child: Text(
+                                dateFormat.format(_fromDate),
+                                style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+                              ),
                             ),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        // To Date
+                        Expanded(
+                          child: InkWell(
+                            onTap: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: _toDate,
+                                firstDate: _fromDate,
+                                lastDate: DateTime.now().add(const Duration(days: 1)),
+                              );
+                              if (picked != null) {
+                                setState(() => _toDate = picked);
+                              }
+                            },
+                            child: InputDecorator(
+                              decoration: InputDecoration(
+                                labelText: isSi ? 'දක්වා දිනය' : 'To Date',
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                prefixIcon: const Icon(Icons.event, size: 18),
+                              ),
+                              child: Text(
+                                dateFormat.format(_toDate),
+                                style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        // Reset to today button
+                        IconButton(
+                          tooltip: isSi ? 'අද දිනයට සකසන්න' : 'Reset to Today',
+                          icon: const Icon(Icons.today, color: AppTheme.primaryBlue, size: 22),
+                          onPressed: () {
+                            setState(() {
+                              _fromDate = DateTime.now();
+                              _toDate = DateTime.now();
+                            });
+                          },
+                        ),
+                      ],
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
-                      const SizedBox(width: 6),
-                      // Reset to today button
-                      IconButton(
-                        tooltip: isSi ? 'අද දිනයට සකසන්න' : 'Reset to Today',
-                        icon: const Icon(Icons.today, color: AppTheme.primaryBlue, size: 22),
-                        onPressed: () {
-                          setState(() {
-                            _fromDate = DateTime.now();
-                            _toDate = DateTime.now();
-                          });
-                        },
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.calendar_today_rounded, size: 16, color: AppTheme.primaryNavy),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  isSi ? 'දින පරාසය' : 'Date Range',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    color: const Color(0xFF64748B),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${dateFormat.format(DateTime.now())} (${isSi ? 'අද දින' : 'Today'})',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF0F172A),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE2E8F0),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.lock_outline_rounded, size: 12, color: Color(0xFF475569)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  isSi ? 'අද පමණි' : 'Today Only',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFF475569),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
                   const SizedBox(height: 10),
 
                   // Search input & method filter chips
@@ -223,7 +305,13 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                           Icon(Icons.receipt_long_outlined, size: 54, color: Colors.grey.shade400),
                           const SizedBox(height: 12),
                           Text(
-                            isSi ? 'තෝරාගත් දින සහ පෙරහන සඳහා රිසිට්පත් හමු නොවීය.' : 'No receipts found for the selected filter.',
+                            isSi
+                                ? (!appState.isAdmin
+                                    ? 'අද දින සඳහා රිසිට්පත් හමු නොවීය.'
+                                    : 'තෝරාගත් දින සහ පෙරහන සඳහා රිසිට්පත් හමු නොවීය.')
+                                : (!appState.isAdmin
+                                    ? 'No receipts found for today.'
+                                    : 'No receipts found for the selected filter.'),
                             style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted),
                           ),
                         ],

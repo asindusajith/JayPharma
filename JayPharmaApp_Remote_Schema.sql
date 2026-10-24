@@ -225,3 +225,21 @@ BEGIN
     ('INV-1070', 'C1003', '2026-09-15', '2026-09-15', 180000.00, 180000.00, 'UNPAID');
 END
 GO
+
+-- 11. Last Generated OTP Table for Security Verification
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'LastGeneratedOtp')
+BEGIN
+    CREATE TABLE LastGeneratedOtp (
+        Id INT PRIMARY KEY DEFAULT 1,
+        OtpCode VARCHAR(10) NOT NULL,
+        CollectorId VARCHAR(50) NULL,
+        CustomerCode VARCHAR(50) NULL,
+        CustomerName NVARCHAR(150) NULL,
+        GeneratedAt DATETIME NOT NULL DEFAULT GETDATE(),
+        ExpiresAt DATETIME NOT NULL,
+        IsUsed BIT NOT NULL DEFAULT 0,
+        UsedAt DATETIME NULL
+    );
+END
+GO
+

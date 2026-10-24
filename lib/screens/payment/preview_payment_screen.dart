@@ -19,6 +19,20 @@ class PreviewPaymentScreen extends StatefulWidget {
 
 class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
   bool _isSubmitting = false;
+  late TextEditingController _remarksController;
+
+  @override
+  void initState() {
+    super.initState();
+    final appState = Provider.of<AppState>(context, listen: false);
+    _remarksController = TextEditingController(text: appState.draftComments);
+  }
+
+  @override
+  void dispose() {
+    _remarksController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -182,11 +196,18 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                             ),
                             child: Column(
                               children: [
-                                _buildPreviewRow(LocalizationService.tr('bank', lang: lang), appState.draftBank ?? 'N/A'),
-                                const SizedBox(height: 4),
-                                _buildPreviewRow(LocalizationService.tr('branch', lang: lang), appState.draftBranch ?? 'N/A'),
-                                const SizedBox(height: 4),
-                                _buildPreviewRow(LocalizationService.tr('cheque_number', lang: lang), appState.draftChequeNumber ?? 'N/A', isBold: true),
+                                _buildPreviewRow(
+                                  'Cheque No (System)',
+                                  appState.draftChequeNumber ?? 'N/A',
+                                  isBold: true,
+                                ),
+                                if (appState.draftBank != null && appState.draftBank!.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  _buildPreviewRow(
+                                    'Bank Code / Branch Code',
+                                    '${appState.draftBank} / ${appState.draftBranch ?? "-"}',
+                                  ),
+                                ],
                                 const SizedBox(height: 4),
                                 _buildPreviewRow(
                                   LocalizationService.tr('cheque_date', lang: lang),
@@ -302,21 +323,92 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                               ],
                             ),
                           ),
-
-                        if (appState.draftComments.isNotEmpty) ...[
-                          const SizedBox(height: 14),
-                          Text('${LocalizationService.tr('add_comment', lang: lang)}:', style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted)),
-                          const SizedBox(height: 2),
-                          Text(
-                            appState.draftComments,
-                            style: GoogleFonts.inter(fontSize: 12, fontStyle: FontStyle.italic, color: AppTheme.textDark),
-                          ),
-                        ],
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
+
+                // Remarks Input Box (Pushes buttons down and feeds into POS print)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AppTheme.lightBlueBg,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.edit_note_rounded, color: AppTheme.primaryNavy, size: 20),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  lang == 'si' ? 'සටහන් / Remarks (විකල්ප)' : 'Remarks (Optional)',
+                                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                                ),
+                                Text(
+                                  lang == 'si'
+                                      ? 'මුද්‍රිත රිසිට්පතෙහි සටහන් කිරීමට අවශ්‍ය නම් පමණක් ඇතුළත් කරන්න'
+                                      : 'Will be printed on POS receipt only if entered',
+                                  style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _remarksController,
+                        maxLines: 2,
+                        onChanged: (val) => appState.setDraftComments(val),
+                        style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textDark),
+                        decoration: InputDecoration(
+                          hintText: lang == 'si'
+                              ? 'රිසිට්පතට අවශ්‍ය සටහනක් ඇතුළත් කරන්න (විකල්ප)...'
+                              : 'Enter remarks to print on receipt (optional)...',
+                          hintStyle: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
 
                 // GPS Mandatory Warning Banner (Hidden for Admin accounts)
                 if (!appState.isAdmin && !appState.isGpsOnline) ...[
@@ -568,7 +660,8 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                 onPressed: () async {
                   Navigator.pop(ctx);
                   final loc = await appState.requestAndConnectGps();
-                  if (loc != null && context.mounted) {
+                  if (!mounted) return;
+                  if (loc != null) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(lang == 'si' ? 'GPS සම්බන්ධ විය!' : 'GPS Connected!'),
@@ -598,6 +691,7 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
     setState(() => _isSubmitting = true);
 
     try {
+      appState.setDraftComments(_remarksController.text.trim());
       final receipt = await appState.confirmAndGenerateReceipt();
 
       if (mounted) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +8,69 @@ import '../../models/receipt.dart';
 import '../../theme/app_theme.dart';
 import '../../services/localization_service.dart';
 import 'preview_payment_screen.dart';
+
+/// Formatter that automatically inserts dashes: XXXXXX-XXXX-XXX (6 digits - 4 digits - 3 digits, max 13 digits)
+class ChequeNumberFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    String newText = newValue.text;
+
+    // Handle backspace directly preceding or on a dash
+    if (oldValue.text.length > newValue.text.length &&
+        oldValue.selection.baseOffset > 0 &&
+        oldValue.selection.baseOffset <= oldValue.text.length &&
+        oldValue.text[oldValue.selection.baseOffset - 1] == '-') {
+      final deletePos = oldValue.selection.baseOffset - 2;
+      if (deletePos >= 0) {
+        newText = oldValue.text.substring(0, deletePos) +
+            oldValue.text.substring(oldValue.selection.baseOffset);
+      }
+    }
+
+    String digits = newText.replaceAll(RegExp(r'\D'), '');
+    if (digits.length > 13) {
+      digits = digits.substring(0, 13);
+    }
+
+    final StringBuffer buffer = StringBuffer();
+    for (int i = 0; i < digits.length; i++) {
+      if (i == 6 || i == 10) {
+        buffer.write('-');
+      }
+      buffer.write(digits[i]);
+    }
+
+    final formatted = buffer.toString();
+
+    // Adjust cursor position so cursor stays aligned after auto-formatting
+    int cursorPosition = formatted.length;
+    if (newValue.selection.baseOffset < newValue.text.length) {
+      int digitsBefore = 0;
+      for (int i = 0; i < newValue.selection.baseOffset && i < newText.length; i++) {
+        if (RegExp(r'\d').hasMatch(newText[i])) {
+          digitsBefore++;
+        }
+      }
+      int targetOffset = 0;
+      int countedDigits = 0;
+      while (targetOffset < formatted.length && countedDigits < digitsBefore) {
+        if (RegExp(r'\d').hasMatch(formatted[targetOffset])) {
+          countedDigits++;
+        }
+        targetOffset++;
+      }
+      cursorPosition = targetOffset;
+    }
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: cursorPosition),
+    );
+  }
+}
 
 class PaymentDetailsScreen extends StatefulWidget {
   const PaymentDetailsScreen({super.key});
@@ -18,26 +82,8 @@ class PaymentDetailsScreen extends StatefulWidget {
 class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
   final _amountController = TextEditingController();
   final _receiptNoController = TextEditingController();
-  final _branchController = TextEditingController();
   final _chequeNoController = TextEditingController();
   final _commentsController = TextEditingController();
-
-  final List<String> _sriLankanBanks = [
-    'Commercial Bank of Ceylon',
-    'Bank of Ceylon (BOC)',
-    'People\'s Bank',
-    'Sampath Bank',
-    'Hatton National Bank (HNB)',
-    'Seylan Bank',
-    'Nations Trust Bank (NTB)',
-    'DFCC Bank',
-    'National Development Bank (NDB)',
-    'Union Bank',
-    'Pan Asia Bank',
-    'Amana Bank',
-    'Standard Chartered Bank',
-    'HSBC Sri Lanka',
-  ];
 
   @override
   void initState() {
@@ -46,6 +92,9 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
     _receiptNoController.text = appState.draftManualReceiptNo;
     if (appState.draftPaymentAmount > 0) {
       _amountController.text = appState.draftPaymentAmount.toStringAsFixed(0);
+    }
+    if (appState.draftChequeNumber != null && appState.draftChequeNumber!.isNotEmpty) {
+      _chequeNoController.text = appState.draftChequeNumber!;
     }
     appState.fetchNextSuggestedReceiptNo().then((_) {
       if (mounted && appState.draftManualReceiptNo.isNotEmpty) {
@@ -60,7 +109,6 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
   void dispose() {
     _amountController.dispose();
     _receiptNoController.dispose();
-    _branchController.dispose();
     _chequeNoController.dispose();
     _commentsController.dispose();
     super.dispose();
@@ -230,7 +278,7 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                                 ],
                               ),
 
-                              // Cheque Fields (Mandatory when Cheque is selected - Section 2.2 & 6)
+                              // Cheque Fields (Full Cheque Number & Cheque Date)
                               if (appState.draftPaymentMethod == PaymentMethod.cheque) ...[
                                 const SizedBox(height: 16),
                                 const Divider(),
@@ -241,103 +289,114 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                                 ),
                                 const SizedBox(height: 12),
 
-                                // Bank Dropdown
-                                DropdownButtonFormField<String>(
-                                  initialValue: appState.draftBank,
-                                  decoration: InputDecoration(
-                                    labelText: LocalizationService.tr('bank', lang: lang),
-                                    prefixIcon: const Icon(Icons.account_balance, size: 20),
-                                  ),
-                                  items: _sriLankanBanks.map((b) => DropdownMenuItem(value: b, child: Text(b, style: GoogleFonts.inter(fontSize: 13)))).toList(),
-                                  onChanged: (val) {
-                                    appState.setDraftChequeDetails(
-                                      bank: val,
-                                      branch: appState.draftBranch,
-                                      chequeNumber: appState.draftChequeNumber,
-                                      chequeDate: appState.draftChequeDate,
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-
-                                // Branch
-                                TextField(
-                                  controller: _branchController,
-                                  onChanged: (val) {
-                                    appState.setDraftChequeDetails(
-                                      bank: appState.draftBank,
-                                      branch: val,
-                                      chequeNumber: appState.draftChequeNumber,
-                                      chequeDate: appState.draftChequeDate,
-                                    );
-                                  },
-                                  decoration: InputDecoration(
-                                    labelText: LocalizationService.tr('branch', lang: lang),
-                                    hintText: lang == 'si' ? 'උදා. කොළඹ කොටුව / කොල්ලුපිටිය' : 'e.g. Colombo Fort / Kollupitiya',
-                                    prefixIcon: const Icon(Icons.location_city, size: 20),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-
-                                // Cheque Number & Cheque Date
+                                // Single Row with Cheque Number Textbox & Cheque Date Picker
                                 Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Expanded(
+                                      flex: 3,
                                       child: TextField(
                                         controller: _chequeNoController,
+                                        keyboardType: TextInputType.number,
+                                        inputFormatters: [ChequeNumberFormatter()],
                                         onChanged: (val) {
+                                          final digits = val.replaceAll(RegExp(r'\D'), '');
+                                          final bankCode = digits.length > 6 ? digits.substring(6, digits.length.clamp(6, 10)) : '';
+                                          final branchCode = digits.length > 10 ? digits.substring(10, digits.length.clamp(10, 13)) : '';
+
                                           appState.setDraftChequeDetails(
-                                            bank: appState.draftBank,
-                                            branch: appState.draftBranch,
-                                            chequeNumber: val,
+                                            bank: bankCode.isNotEmpty ? bankCode : null,
+                                            branch: branchCode.isNotEmpty ? branchCode : null,
+                                            chequeNumber: val, // Sent with dashes: e.g. 123456-1234-123
                                             chequeDate: appState.draftChequeDate,
                                           );
+                                          setState(() {});
                                         },
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 14.5,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.6,
+                                          color: AppTheme.textDark,
+                                        ),
                                         decoration: InputDecoration(
-                                          labelText: LocalizationService.tr('cheque_number', lang: lang),
-                                          hintText: 'e.g. 748291',
+                                          labelText: lang == 'si' ? 'චෙක්පත් අංකය' : 'Cheque Number',
+                                          hintText: '123456-1234-123',
+                                          hintStyle: GoogleFonts.outfit(fontSize: 13, color: Colors.grey.shade400, letterSpacing: 0.6),
                                           prefixIcon: const Icon(Icons.confirmation_number_outlined, size: 20),
                                         ),
                                       ),
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(
-                                      child: InkWell(
-                                        onTap: () async {
-                                          final picked = await showDatePicker(
-                                            context: context,
-                                            initialDate: appState.draftChequeDate ?? DateTime.now(),
-                                            firstDate: DateTime.now().subtract(const Duration(days: 90)),
-                                            lastDate: DateTime.now().add(const Duration(days: 180)),
-                                          );
-                                          if (picked != null) {
-                                            appState.setDraftChequeDetails(
-                                              bank: appState.draftBank,
-                                              branch: appState.draftBranch,
-                                              chequeNumber: appState.draftChequeNumber,
-                                              chequeDate: picked,
-                                            );
-                                          }
-                                        },
-                                        child: InputDecorator(
-                                          decoration: InputDecoration(
-                                            labelText: LocalizationService.tr('cheque_date', lang: lang),
-                                            prefixIcon: const Icon(Icons.calendar_today, size: 20),
-                                          ),
-                                          child: Text(
-                                            appState.draftChequeDate != null
-                                                ? dateFormat.format(appState.draftChequeDate!)
-                                                : (lang == 'si' ? 'දිනය තෝරන්න' : 'Select Date'),
-                                            style: GoogleFonts.inter(
-                                              fontSize: 13,
-                                              color: appState.draftChequeDate != null ? AppTheme.textDark : AppTheme.textLight,
+                                      flex: 2,
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          InkWell(
+                                            borderRadius: BorderRadius.circular(12),
+                                            onTap: () => _pickChequeDate(appState, dateFormat),
+                                            child: InputDecorator(
+                                              decoration: InputDecoration(
+                                                labelText: LocalizationService.tr('cheque_date', lang: lang),
+                                                prefixIcon: const Icon(Icons.calendar_today_rounded, size: 18),
+                                              ),
+                                              child: Text(
+                                                appState.draftChequeDate != null
+                                                    ? dateFormat.format(appState.draftChequeDate!)
+                                                    : (lang == 'si' ? 'දිනය' : 'Date'),
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: appState.draftChequeDate != null ? AppTheme.textDark : AppTheme.textLight,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
                                             ),
                                           ),
-                                        ),
+                                          if (appState.draftChequeDate != null) ...[
+                                            Builder(
+                                              builder: (_) {
+                                                final now = DateTime.now();
+                                                final today = DateTime(now.year, now.month, now.day);
+                                                final chosen = DateTime(appState.draftChequeDate!.year, appState.draftChequeDate!.month, appState.draftChequeDate!.day);
+                                                final diffDays = chosen.difference(today).inDays;
+                                                if (diffDays > 30) {
+                                                  return Padding(
+                                                    padding: const EdgeInsets.only(top: 4, left: 2),
+                                                    child: Row(
+                                                      children: [
+                                                        const Icon(Icons.warning_amber_rounded, size: 12, color: Color(0xFFD97706)),
+                                                        const SizedBox(width: 3),
+                                                        Expanded(
+                                                          child: Text(
+                                                            'More than 30 days ($diffDays days)',
+                                                            style: GoogleFonts.inter(
+                                                              fontSize: 10,
+                                                              fontWeight: FontWeight.bold,
+                                                              color: const Color(0xFFB45309),
+                                                            ),
+                                                            maxLines: 1,
+                                                            overflow: TextOverflow.ellipsis,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                }
+                                                return const SizedBox.shrink();
+                                              },
+                                            ),
+                                          ],
+                                        ],
                                       ),
                                     ),
                                   ],
                                 ),
+
+                                // Display breakdown table directly below as requested in Image 2
+                                _buildChequeBreakdown(_chequeNoController.text, lang),
                               ],
                             ],
                           ),
@@ -388,27 +447,6 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                               ),
                               const SizedBox(height: 10),
 
-                              // Quick Amount Chips
-                              SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: [50000, 100000, 200000, 335000, 487650].map((amt) {
-                                    return Padding(
-                                      padding: const EdgeInsets.only(right: 6),
-                                      child: ActionChip(
-                                        label: Text('Rs. ${currency.format(amt).replaceAll('.00', '')}'),
-                                        onPressed: () {
-                                          _amountController.text = amt.toString();
-                                          appState.setDraftPaymentAmount(amt.toDouble());
-                                        },
-                                        labelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600),
-                                        backgroundColor: const Color(0xFFF1F5F9),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                      ),
-                                    );
-                                  }).toList(),
-                                ),
-                              ),
                               const SizedBox(height: 16),
                               const Divider(),
                               const SizedBox(height: 12),
@@ -455,18 +493,36 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                               const SizedBox(height: 8),
                               TextField(
                                 controller: _receiptNoController,
-                                onChanged: (val) {
-                                  appState.setDraftManualReceiptNo(val);
-                                },
-                                textCapitalization: TextCapitalization.characters,
+                                readOnly: true,
+                                canRequestFocus: false,
+                                enableInteractiveSelection: false,
+                                mouseCursor: SystemMouseCursors.basic,
                                 style: GoogleFonts.inter(
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
                                   color: AppTheme.receiptRed,
                                 ),
-                                decoration: const InputDecoration(
-                                  prefixIcon: Icon(Icons.receipt, size: 20, color: AppTheme.receiptRed),
-                                  hintText: 'e.g. MR-026458',
+                                decoration: InputDecoration(
+                                  prefixIcon: const Icon(Icons.receipt, size: 20, color: AppTheme.receiptRed),
+                                  suffixIcon: const Padding(
+                                    padding: EdgeInsets.symmetric(horizontal: 10),
+                                    child: Icon(Icons.lock_rounded, size: 18, color: Color(0xFF64748B)),
+                                  ),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF8FAFC),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                 ),
                               ),
                             ],
@@ -1244,5 +1300,263 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
         ],
       ),
     );
+  }
+
+  /// Display breakdown table directly matching Image 2
+  Widget _buildChequeBreakdown(String rawText, String lang) {
+    final digits = rawText.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final chequeNo = digits.isNotEmpty ? digits.substring(0, digits.length.clamp(0, 6)) : '------';
+    final bankCode = digits.length > 6 ? digits.substring(6, digits.length.clamp(6, 10)) : (digits.length == 6 ? '----' : '-');
+    final branchCode = digits.length > 10 ? digits.substring(10, digits.length.clamp(10, 13)) : (digits.length >= 10 ? '---' : '-');
+
+    final StringBuffer sysBuffer = StringBuffer();
+    for (int i = 0; i < digits.length; i++) {
+      if (i == 6 || i == 10) sysBuffer.write('-');
+      sysBuffer.write(digits[i]);
+    }
+    final systemChequeNo = sysBuffer.toString();
+    final isComplete = digits.length == 13;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isComplete ? const Color(0xFF86EFAC) : const Color(0xFFCBD5E1), width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Display',
+                style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  decoration: TextDecoration.underline,
+                  color: const Color(0xFF0F172A),
+                ),
+              ),
+              if (isComplete)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDCFCE7),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFBBF7D0)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF16A34A)),
+                      const SizedBox(width: 4),
+                      Text(
+                        lang == 'si' ? 'අංක 13 සම්පූර්ණයි' : '13 Digits Complete',
+                        style: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.bold, color: const Color(0xFF15803D)),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Text(
+                  '${digits.length}/13 Digits',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF64748B),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              children: [
+                _buildBreakdownRow('Cheque No:', chequeNo),
+                const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                _buildBreakdownRow('Bank Code:', bankCode),
+                const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                _buildBreakdownRow('Branch Code:', branchCode),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Cheque No (On System) in red text as depicted in user's image
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFECACA)),
+            ),
+            child: RichText(
+              text: TextSpan(
+                style: GoogleFonts.inter(fontSize: 12.5),
+                children: [
+                  TextSpan(
+                    text: 'Cheque No (On System) - ',
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF991B1B),
+                    ),
+                  ),
+                  TextSpan(
+                    text: systemChequeNo,
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                      color: const Color(0xFFB91C1C),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBreakdownRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF334155),
+            ),
+          ),
+          Text(
+            value,
+            style: GoogleFonts.outfit(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+              color: const Color(0xFF0F172A),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickChequeDate(AppState appState, DateFormat dateFormat) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: appState.draftChequeDate ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 90)),
+      lastDate: DateTime.now().add(const Duration(days: 180)),
+    );
+    if (picked != null) {
+      appState.setDraftChequeDetails(
+        bank: appState.draftBank,
+        branch: appState.draftBranch,
+        chequeNumber: appState.draftChequeNumber,
+        chequeDate: picked,
+      );
+      if (!mounted) return;
+      setState(() {});
+
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final chosen = DateTime(picked.year, picked.month, picked.day);
+      final diffDays = chosen.difference(today).inDays;
+
+      if (diffDays > 30) {
+        if (!mounted) return;
+        // Show Alert Dialog in English informing the user
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 24),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Cheque Date Notice',
+                    style: GoogleFonts.outfit(
+                      fontSize: 16.5,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF0F172A),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              'This selected cheque date (${dateFormat.format(picked)}) is more than 30 days from today ($diffDays days post-dated).',
+              style: GoogleFonts.inter(
+                fontSize: 13.5,
+                color: const Color(0xFF334155),
+                height: 1.45,
+              ),
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F172A),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                ),
+                child: Text(
+                  'OK',
+                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'This selected cheque date is more than 30 days ($diffDays days from today).',
+                    style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFFD97706),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    }
   }
 }

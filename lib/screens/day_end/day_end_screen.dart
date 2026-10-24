@@ -39,9 +39,15 @@ class _DayEndScreenState extends State<DayEndScreen> {
     final startOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
     final endOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 23, 59, 59);
     final dayReceipts = appState.receipts.where((r) {
-      return !r.isCancelled &&
-          r.createdAt.isAfter(startOfDay) &&
-          r.createdAt.isBefore(endOfDay);
+      if (r.isCancelled) return false;
+      if (r.createdAt.isBefore(startOfDay) || r.createdAt.isAfter(endOfDay)) return false;
+      if (!appState.isAdmin) {
+        final myId = appState.collectorId.trim().toLowerCase();
+        final myUsername = appState.currentUser.username.trim().toLowerCase();
+        final rId = r.collectorId.trim().toLowerCase();
+        return rId == myId || rId == myUsername;
+      }
+      return true;
     }).toList();
 
     final isSi = lang == 'si';
@@ -507,19 +513,24 @@ class _DayEndScreenState extends State<DayEndScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
-              appState.finalizeDayEndSummary(_notesController.text.trim());
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    isSi
-                        ? 'දින අවසාන ප්‍රකාශනය සම්පූර්ණ කරන ලදී. අද දින ගෙවීම් ලබාගැනීම අගුලු ලන ලදී.'
-                        : 'Day-end statement finalized. Payment recording has been locked for today.',
+              await appState.finalizeDayEndSummary(_notesController.text.trim());
+              if (context.mounted && !appState.isAdmin) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              }
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      isSi
+                          ? 'දින අවසාන ප්‍රකාශනය සම්පූර්ණ කරන ලදී. පද්ධතිය අගුලු ලන ලදී.'
+                          : 'Day-end statement finalized. System locked until next Day Start.',
+                    ),
+                    backgroundColor: AppTheme.successGreen,
                   ),
-                  backgroundColor: AppTheme.successGreen,
-                ),
-              );
+                );
+              }
             },
             child: Text(isSi ? 'තහවුරු කර අගුලු ලන්න' : 'Confirm & Lock Day-End'),
           ),

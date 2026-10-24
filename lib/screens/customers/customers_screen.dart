@@ -7,6 +7,7 @@ import '../../models/invoice.dart';
 import '../../providers/app_state.dart';
 import '../../theme/app_theme.dart';
 import '../../services/localization_service.dart';
+import '../../services/receipt_printer_service.dart';
 import '../payment/payment_details_screen.dart';
 
 enum CustomerFilterTab { all, hasBalance, settled }
@@ -36,6 +37,517 @@ class _CustomersScreenState extends State<CustomersScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  /// Requires OTP verification for Normal Users (Admin bypassed)
+  Future<bool> _showOtpDialog(Customer customer) async {
+    final appState = Provider.of<AppState>(context, listen: false);
+    final isSi = appState.currentLanguage == 'si';
+
+    // Show initial loading while generating OTP
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 10,
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+              const SizedBox(width: 14),
+              Text(
+                isSi ? 'OTP අංකයක් ජනනය වෙමින් පවතී...' : 'Generating security OTP...',
+                style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF0F172A)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final otpRes = await appState.generateStatementOtp(customer);
+    if (!mounted) return false;
+    Navigator.pop(context); // close generating dialog
+
+    if (otpRes['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(otpRes['message']?.toString() ?? 'Failed to generate OTP.'),
+          backgroundColor: AppTheme.dangerRed,
+        ),
+      );
+      return false;
+    }
+
+    // Show interactive OTP entry dialog
+    final bool? isVerified = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final otpController = TextEditingController();
+        String? errorMessage;
+        bool isVerifying = false;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.shield_outlined, color: Color(0xFF1D4ED8), size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isSi ? 'OTP ආරක්ෂක තහවුරු කිරීම' : 'OTP Security Verification',
+                          style: GoogleFonts.outfit(fontSize: 16.5, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                        ),
+                        Text(
+                          isSi ? 'කළමනාකාරීත්ව අනුමැතිය අවශ්‍යයි' : 'Management Authorization Required',
+                          style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF1D4ED8), fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      isSi
+                          ? 'මෙම පාරිභෝගිකයාගේ ගිණුම් ප්‍රකාශනය මුද්‍රණය කිරීමට කළමනාකාරීත්ව අනුමැතිය (Management Authorization) අවශ්‍ය වේ.'
+                          : 'Management authorization is required to print this customer statement.',
+                      style: GoogleFonts.inter(fontSize: 12.5, height: 1.35, color: const Color(0xFF334155)),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Official Notice Banner: OTP sent to Management Team
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2563EB),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.send_rounded, size: 16, color: Colors.white),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  isSi
+                                      ? 'OTP අංකය Management Team වෙත යොමු කරන ලදී.'
+                                      : 'OTP has been sent to the Management Team.',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: const Color(0xFF1E3A8A),
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  isSi
+                                      ? 'මුද්‍රණය සඳහා අනුමැතිය ලබා ගැනීමට Management Team එකෙන් ලැබෙන ඉලක්කම් 6 ක OTP අංකය ඇතුළත් කරන්න.'
+                                      : 'Please obtain the 6-digit authorization OTP from the Management Team and enter it below.',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    color: const Color(0xFF3B82F6),
+                                    height: 1.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // OTP Input Box
+                    TextField(
+                      controller: otpController,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      maxLength: 6,
+                      autofocus: true,
+                      style: GoogleFonts.robotoMono(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 8,
+                        color: const Color(0xFF0F1E36),
+                      ),
+                      decoration: InputDecoration(
+                        counterText: '',
+                        hintText: '------',
+                        hintStyle: GoogleFonts.robotoMono(letterSpacing: 8, color: const Color(0xFFCBD5E1)),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF2563EB), width: 2),
+                        ),
+                      ),
+                      onChanged: (val) {
+                        if (errorMessage != null) {
+                          setDialogState(() => errorMessage = null);
+                        }
+                      },
+                    ),
+
+                    if (errorMessage != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        errorMessage!,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.w600, color: const Color(0xFFDC2626)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isVerifying ? null : () => Navigator.pop(ctx, false),
+                  child: Text(
+                    isSi ? 'අවලංගු කරන්න' : 'Cancel',
+                    style: GoogleFonts.inter(color: const Color(0xFF64748B), fontWeight: FontWeight.w600),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: isVerifying
+                      ? null
+                      : () async {
+                          final code = otpController.text.trim();
+                          if (code.length != 6) {
+                            setDialogState(() {
+                              errorMessage = isSi ? 'කරුණාකර ඉලක්කම් 6 ක OTP අංකය ඇතුළත් කරන්න.' : 'Please enter the 6-digit OTP code.';
+                            });
+                            return;
+                          }
+
+                          setDialogState(() {
+                            isVerifying = true;
+                            errorMessage = null;
+                          });
+
+                          final vRes = await appState.verifyStatementOtp(code);
+                          if (!ctx.mounted) return;
+
+                          if (vRes['success'] == true) {
+                            Navigator.pop(ctx, true);
+                          } else {
+                            setDialogState(() {
+                              isVerifying = false;
+                              errorMessage = vRes['message']?.toString() ?? (isSi ? 'වැරදි OTP අංකයකි.' : 'Invalid OTP code.');
+                            });
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F1E36),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: isVerifying
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : Text(
+                          isSi ? 'තහවුරු කරන්න' : 'Verify & Print',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    return isVerified ?? false;
+  }
+
+  Future<void> _handlePrintCustomerStatement(Customer customer) async {
+    final appState = Provider.of<AppState>(context, listen: false);
+    final isSi = appState.currentLanguage == 'si';
+    final currency = NumberFormat('#,##0.00', 'en_US');
+
+    // 0. Security Check: Normal Users require OTP verification before printing statement
+    if (!appState.isAdmin) {
+      final isOtpValid = await _showOtpDialog(customer);
+      if (!mounted) return;
+      if (!isOtpValid) return; // User cancelled or failed OTP verification
+    }
+
+    // 1. Fetch invoices if not already cached
+    var invoices = appState.getCustomerInvoices(customer.code);
+    if (invoices.isEmpty) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 10,
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 14),
+                Text(
+                  isSi ? 'ඉන්වොයිසි දත්ත පූරණය වෙමින් පවතී...' : 'Fetching customer invoices...',
+                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF0F172A)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      await appState.fetchInvoicesForCustomerRealtime(customer.code);
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+      invoices = appState.getCustomerInvoices(customer.code);
+    }
+
+    if (invoices.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isSi ? 'මෙම පාරිභෝගිකයා සඳහා ඉන්වොයිසි නොමැත.' : 'No invoices found for this customer.'),
+          backgroundColor: AppTheme.dangerRed,
+        ),
+      );
+      return;
+    }
+
+    final outstandingInvoices = invoices.where((i) => i.outstandingBalance > 0.01).toList();
+    final outstandingSum = customer.totalOutstanding > 0.01
+        ? customer.totalOutstanding
+        : outstandingInvoices.fold<double>(0.0, (sum, i) => sum + i.outstandingBalance);
+
+    if (!mounted) return;
+
+    // 2. Ask user: Outstanding only or All invoices?
+    final bool? printOnlyOutstanding = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.print_rounded, color: Color(0xFF1D4ED8), size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isSi ? 'POS ප්‍රකාශනය මුද්‍රණය' : 'POS Statement Print',
+                      style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                    ),
+                    Text(
+                      '${customer.code} • ${customer.name}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                isSi
+                    ? 'මුද්‍රණය කළ යුත්තේ හිඟ මුදල් පමණක් ද නැතහොත් සියලු ඉන්වොයිසි ද?'
+                    : 'Print Outstanding invoices only or All invoice history?',
+                style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B)),
+              ),
+              const SizedBox(height: 16),
+
+              // Option 1: Outstanding Only
+              InkWell(
+                onTap: () => Navigator.pop(ctx, true),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFDE68A), width: 1.2),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD97706),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.pending_actions_rounded, color: Colors.white, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isSi ? 'හිඟ මුදල් පමණක් (Outstanding Only)' : 'Outstanding Only',
+                              style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFF92400E)),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isSi
+                                  ? 'හිඟ ඉන්වොයිසි ${outstandingInvoices.length} ක් • Rs. ${currency.format(outstandingSum)}'
+                                  : '${outstandingInvoices.length} due invoices • Rs. ${currency.format(outstandingSum)}',
+                              style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFFB45309), fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right, color: Color(0xFFB45309)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // Option 2: All Invoices (History)
+              InkWell(
+                onTap: () => Navigator.pop(ctx, false),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFCBD5E1), width: 1.2),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0F1E36),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.receipt_long_rounded, color: Colors.white, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isSi ? 'සියලු ඉන්වොයිසි (All History)' : 'All Invoices (Full History)',
+                              style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isSi
+                                  ? 'සමථය වූ සහ හිඟ සියලු ඉන්වොයිසි ${invoices.length} ම'
+                                  : 'All ${invoices.length} invoices including settled ones',
+                              style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF475569), fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right, color: Color(0xFF475569)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: Text(
+                isSi ? 'අවලංගු කරන්න' : 'Cancel',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: const Color(0xFF64748B)),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (printOnlyOutstanding == null) return; // User cancelled
+
+    // 3. Trigger POS thermal print layout
+    try {
+      await ReceiptPrinterService.printCustomerStatement(
+        customer,
+        invoices,
+        onlyOutstanding: printOnlyOutstanding,
+        collectorName: appState.currentUser.fullName,
+        collectorId: appState.currentUser.collectorId,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print dialog error: $e'), backgroundColor: AppTheme.dangerRed),
+      );
+    }
   }
 
   @override
@@ -158,7 +670,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                         ),
                         const SizedBox(width: 8),
                         _buildFilterTab(
-                          label: isSi ? 'හිඟ මුදල් සහිත (${countWithBalance})' : 'With Dues (${countWithBalance})',
+                          label: isSi ? 'හිඟ මුදල් සහිත ($countWithBalance)' : 'With Dues ($countWithBalance)',
                           tab: CustomerFilterTab.hasBalance,
                         ),
                         const SizedBox(width: 8),
@@ -268,7 +780,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       itemCount: filteredCustomers.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final customer = filteredCustomers[index];
                         final isExpanded = _expandedCustomerCodes.contains(customer.code);
@@ -347,7 +859,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
         ),
         boxShadow: [
           BoxShadow(
-            color: isExpanded ? const Color(0xFF2563EB).withOpacity(0.08) : Colors.black.withOpacity(0.03),
+            color: isExpanded ? const Color(0xFF2563EB).withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -443,6 +955,24 @@ class _CustomersScreenState extends State<CustomersScreen> {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(width: 8),
+
+                      // Quick POS Print Button
+                      IconButton(
+                        icon: const Icon(Icons.print_outlined, size: 19, color: Color(0xFF1D4ED8)),
+                        tooltip: isSi ? 'ගිණුම් ප්‍රකාශනය මුද්‍රණය (POS)' : 'Print POS Statement',
+                        style: IconButton.styleFrom(
+                          backgroundColor: const Color(0xFFEFF6FF),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: const BorderSide(color: Color(0xFFBFDBFE)),
+                          ),
+                          padding: const EdgeInsets.all(6),
+                          minimumSize: const Size(34, 34),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => _handlePrintCustomerStatement(customer),
                       ),
                     ],
                   ),
@@ -677,36 +1207,61 @@ class _CustomersScreenState extends State<CustomersScreen> {
                     ),
                   const SizedBox(height: 12),
 
-                  // Quick Collect Payment CTA
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.add_card, size: 16),
-                    label: Text(
-                      isSi ? 'මෙම පාරිභෝගිකයාගෙන් මුදල් අයකරගන්න' : 'Collect Payment for this Customer',
-                      style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F1E36),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      elevation: 0,
-                    ),
-                    onPressed: () {
-                      if (appState.isDayEndFinalized) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(LocalizationService.tr('day_end_locked_msg', lang: lang)),
-                            backgroundColor: AppTheme.dangerRed,
+                  // Action Buttons: Quick Collect & POS Statement Print
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.add_card, size: 16),
+                          label: Text(
+                            isSi ? 'මුදල් අයකරගන්න' : 'Collect Payment',
+                            style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.bold),
                           ),
-                        );
-                        return;
-                      }
-                      appState.startNewPayment(customer);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const PaymentDetailsScreen()),
-                      );
-                    },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0F1E36),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            elevation: 0,
+                          ),
+                          onPressed: () {
+                            if (appState.isDayEndFinalized) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(LocalizationService.tr('day_end_locked_msg', lang: lang)),
+                                  backgroundColor: AppTheme.dangerRed,
+                                ),
+                              );
+                              return;
+                            }
+                            appState.startNewPayment(customer);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const PaymentDetailsScreen()),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.print, size: 16, color: Color(0xFF1D4ED8)),
+                          label: Text(
+                            isSi ? 'POS Print' : 'POS Print',
+                            style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.bold, color: const Color(0xFF1D4ED8)),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFFBFDBFE), width: 1.2),
+                            backgroundColor: const Color(0xFFEFF6FF),
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: () => _handlePrintCustomerStatement(customer),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

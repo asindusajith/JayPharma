@@ -6,6 +6,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/receipt.dart';
 import '../models/day_end_summary.dart';
+import '../models/customer.dart';
+import '../models/invoice.dart';
 
 class ReceiptPrinterService {
   static final currencyFormat = NumberFormat('#,##0.00', 'en_US');
@@ -207,9 +209,15 @@ class ReceiptPrinterService {
                 ),
                 pw.Divider(thickness: 0.8),
 
-                if (receipt.comments.isNotEmpty) ...[
+                if (receipt.comments.trim().isNotEmpty) ...[
                   pw.SizedBox(height: 3),
-                  pw.Text('Notes: ${receipt.comments}', style: const pw.TextStyle(fontSize: 7)),
+                  pw.Align(
+                    alignment: pw.Alignment.centerLeft,
+                    child: pw.Text(
+                      'Remarks: ${receipt.comments.trim()}',
+                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+                    ),
+                  ),
                 ],
 
                 pw.SizedBox(height: 6),
@@ -452,6 +460,324 @@ class ReceiptPrinterService {
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdfBytes,
       name: 'JayPharma_DayEnd_${DateFormat('yyyyMMdd').format(summary.date)}',
+    );
+  }
+
+  /// Generates 80mm POS Thermal Statement for a Customer
+  static Future<Uint8List> generateCustomerStatementPdf(
+    Customer customer,
+    List<Invoice> invoices, {
+    required bool onlyOutstanding,
+    required String collectorName,
+    required String collectorId,
+  }) async {
+    final pdf = pw.Document();
+
+    pw.MemoryImage? logoImage;
+    try {
+      final bytes = await rootBundle.load('assets/images/jay_pharma_logo.png');
+      logoImage = pw.MemoryImage(bytes.buffer.asUint8List());
+    } catch (_) {}
+
+    final filteredInvoices = onlyOutstanding
+        ? invoices.where((i) => i.outstandingBalance > 0.01).toList()
+        : List<Invoice>.from(invoices);
+
+    final totalInvAmount = filteredInvoices.fold<double>(0.0, (sum, i) => sum + i.totalAmount);
+    final totalSettledAmount = filteredInvoices.fold<double>(0.0, (sum, i) => sum + i.setAmt);
+    final totalOutstanding = filteredInvoices.fold<double>(0.0, (sum, i) => sum + i.outstandingBalance);
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: const PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 4 * PdfPageFormat.mm),
+        build: (pw.Context context) {
+          return pw.Container(
+            padding: const pw.EdgeInsets.all(6),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                // Header
+                pw.Center(
+                  child: pw.Column(
+                    children: [
+                      if (logoImage != null) ...[
+                        pw.Image(logoImage, height: 32, fit: pw.BoxFit.contain),
+                        pw.SizedBox(height: 4),
+                      ],
+                      pw.Text(
+                        'JAY PHARMA (PVT) LTD',
+                        style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        'No. 123, Main Street, Colombo 07, Sri Lanka',
+                        style: const pw.TextStyle(fontSize: 8),
+                        textAlign: pw.TextAlign.center,
+                      ),
+                      pw.Text(
+                        'Tel: 011 234 5678 | Email: info@jaypharma.lk',
+                        style: const pw.TextStyle(fontSize: 8),
+                        textAlign: pw.TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 6),
+                pw.Divider(thickness: 0.8),
+
+                // Statement Title
+                pw.Center(
+                  child: pw.Column(
+                    children: [
+                      pw.Text(
+                        'CUSTOMER STATEMENT',
+                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Container(
+                        padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: pw.BoxDecoration(
+                          color: onlyOutstanding ? PdfColors.amber100 : PdfColors.blue100,
+                          borderRadius: pw.BorderRadius.circular(4),
+                          border: pw.Border.all(color: onlyOutstanding ? PdfColors.amber800 : PdfColors.blue800, width: 0.5),
+                        ),
+                        child: pw.Text(
+                          onlyOutstanding ? 'OUTSTANDING INVOICES ONLY' : 'ALL INVOICES (FULL HISTORY)',
+                          style: pw.TextStyle(
+                            fontSize: 7.5,
+                            fontWeight: pw.FontWeight.bold,
+                            color: onlyOutstanding ? PdfColors.amber900 : PdfColors.blue900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 6),
+                pw.Divider(thickness: 0.8),
+
+                // Customer Details Table
+                pw.Table(
+                  columnWidths: {
+                    0: const pw.FlexColumnWidth(3.0),
+                    1: const pw.FlexColumnWidth(0.5),
+                    2: const pw.FlexColumnWidth(7.5),
+                  },
+                  children: [
+                    pw.TableRow(
+                      children: [
+                        pw.Text('Customer No', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text(':', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text(customer.code, style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
+                      ],
+                    ),
+                    pw.TableRow(
+                      children: [
+                        pw.Text('Customer Name', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text(':', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text(customer.name, style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
+                      ],
+                    ),
+                    if (customer.town.isNotEmpty)
+                      pw.TableRow(
+                        children: [
+                          pw.Text('Town / Area', style: const pw.TextStyle(fontSize: 8)),
+                          pw.Text(':', style: const pw.TextStyle(fontSize: 8)),
+                          pw.Text(customer.town, style: const pw.TextStyle(fontSize: 8)),
+                        ],
+                      ),
+                    if (customer.address.isNotEmpty)
+                      pw.TableRow(
+                        children: [
+                          pw.Text('Address', style: const pw.TextStyle(fontSize: 8)),
+                          pw.Text(':', style: const pw.TextStyle(fontSize: 8)),
+                          pw.Text(customer.address, style: const pw.TextStyle(fontSize: 7.5)),
+                        ],
+                      ),
+                    if (customer.phone.isNotEmpty)
+                      pw.TableRow(
+                        children: [
+                          pw.Text('Contact No', style: const pw.TextStyle(fontSize: 8)),
+                          pw.Text(':', style: const pw.TextStyle(fontSize: 8)),
+                          pw.Text(customer.phone, style: const pw.TextStyle(fontSize: 8)),
+                        ],
+                      ),
+                    pw.TableRow(
+                      children: [
+                        pw.Text('Statement Date', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text(':', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text(DateFormat('dd/MM/yyyy  HH:mm').format(DateTime.now()), style: const pw.TextStyle(fontSize: 8)),
+                      ],
+                    ),
+                    pw.TableRow(
+                      children: [
+                        pw.Text('Prepared By', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text(':', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text('$collectorName ($collectorId)', style: const pw.TextStyle(fontSize: 8)),
+                      ],
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 6),
+                pw.Divider(thickness: 0.8),
+
+                // Table Header
+                pw.Row(
+                  children: [
+                    pw.Expanded(flex: 1, child: pw.Text('#', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold))),
+                    pw.Expanded(flex: 3, child: pw.Text('Inv No', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold))),
+                    pw.Expanded(flex: 3, child: pw.Text('Date (Age)', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold))),
+                    pw.Expanded(flex: 3, child: pw.Text('Inv Amt (Rs)', textAlign: pw.TextAlign.right, style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold))),
+                    pw.Expanded(flex: 3, child: pw.Text('Balance (Rs)', textAlign: pw.TextAlign.right, style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold))),
+                  ],
+                ),
+                pw.Divider(thickness: 0.5),
+
+                // Invoices Rows
+                if (filteredInvoices.isEmpty) ...[
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(vertical: 8),
+                    child: pw.Center(
+                      child: pw.Text(
+                        onlyOutstanding ? 'No outstanding invoices. All settled!' : 'No invoices on record.',
+                        style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+                      ),
+                    ),
+                  ),
+                ] else ...[
+                  for (int i = 0; i < filteredInvoices.length; i++) ...[
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+                      child: pw.Row(
+                        children: [
+                          pw.Expanded(flex: 1, child: pw.Text('${i + 1}', style: const pw.TextStyle(fontSize: 7))),
+                          pw.Expanded(flex: 3, child: pw.Text(filteredInvoices[i].invoiceNo, style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold))),
+                          pw.Expanded(
+                            flex: 3,
+                            child: pw.Text(
+                              '${dateFormat.format(filteredInvoices[i].invoiceDate)} (${filteredInvoices[i].deliveryAgeDays}d)',
+                              style: const pw.TextStyle(fontSize: 6.5),
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 3,
+                            child: pw.Text(
+                              currencyFormat.format(filteredInvoices[i].totalAmount),
+                              textAlign: pw.TextAlign.right,
+                              style: const pw.TextStyle(fontSize: 7),
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 3,
+                            child: pw.Text(
+                              filteredInvoices[i].outstandingBalance <= 0.01
+                                  ? '0.00'
+                                  : currencyFormat.format(filteredInvoices[i].outstandingBalance),
+                              textAlign: pw.TextAlign.right,
+                              style: pw.TextStyle(
+                                fontSize: 7.5,
+                                fontWeight: filteredInvoices[i].outstandingBalance > 0.01 ? pw.FontWeight.bold : pw.FontWeight.normal,
+                                color: filteredInvoices[i].outstandingBalance > 0.01 ? PdfColors.black : PdfColors.grey700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+
+                pw.Divider(thickness: 0.8),
+                pw.SizedBox(height: 2),
+
+                // Summary
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Total Invoices Count:', style: const pw.TextStyle(fontSize: 8)),
+                    pw.Text('${filteredInvoices.length}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  ],
+                ),
+                pw.SizedBox(height: 2),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Total Invoiced Value:', style: const pw.TextStyle(fontSize: 8)),
+                    pw.Text('Rs. ${currencyFormat.format(totalInvAmount)}', style: const pw.TextStyle(fontSize: 8)),
+                  ],
+                ),
+                pw.SizedBox(height: 2),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Total Settled Amount:', style: const pw.TextStyle(fontSize: 8)),
+                    pw.Text('Rs. ${currencyFormat.format(totalSettledAmount)}', style: const pw.TextStyle(fontSize: 8)),
+                  ],
+                ),
+                pw.Divider(thickness: 1),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('TOTAL OUTSTANDING DUE:', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Rs. ${currencyFormat.format(totalOutstanding)}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                  ],
+                ),
+                pw.Divider(thickness: 1),
+                pw.SizedBox(height: 16),
+
+                // Collector Signature
+                pw.Align(
+                  alignment: pw.Alignment.centerRight,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.center,
+                    children: [
+                      pw.Container(
+                        width: 110,
+                        decoration: const pw.BoxDecoration(
+                          border: pw.Border(top: pw.BorderSide(width: 0.8, color: PdfColors.black)),
+                        ),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Text("Representative's Signature", style: const pw.TextStyle(fontSize: 7.5)),
+                      pw.Text('($collectorName)', style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.grey700)),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Center(
+                  child: pw.Text(
+                    'Computer generated POS statement. Retain for records.',
+                    style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.grey600),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  /// Triggers POS thermal printing for Customer History / Statement
+  static Future<void> printCustomerStatement(
+    Customer customer,
+    List<Invoice> invoices, {
+    required bool onlyOutstanding,
+    required String collectorName,
+    required String collectorId,
+  }) async {
+    final pdfBytes = await generateCustomerStatementPdf(
+      customer,
+      invoices,
+      onlyOutstanding: onlyOutstanding,
+      collectorName: collectorName,
+      collectorId: collectorId,
+    );
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdfBytes,
+      name: 'JayPharma_${customer.code}_Statement',
     );
   }
 }

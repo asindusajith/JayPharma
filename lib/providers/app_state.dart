@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/customer.dart';
 import '../models/invoice.dart';
 import '../models/receipt.dart';
@@ -99,6 +99,21 @@ class AppState extends ChangeNotifier {
   bool get isAdmin => currentUser.isAdmin;
   bool get isManager => currentUser.isManager;
 
+  /// Prefix used for Manual Receipt Numbers based on User's Code / Collector ID (e.g. XXX-026470)
+  String get userReceiptPrefix {
+    String code = collectorId.trim();
+    if (code.toUpperCase().startsWith('COL-') && code.length > 4) {
+      code = code.substring(4).trim();
+    }
+    if (code.isEmpty) {
+      code = currentUser.username.trim();
+    }
+    if (code.isEmpty) {
+      code = 'MR';
+    }
+    return code.toUpperCase();
+  }
+
   final String deviceId = 'TAB-COL-042 (Samsung Tab Active 3)';
   bool isDeviceAuthorized = true;
   bool isLoggedIn = false;
@@ -121,9 +136,14 @@ class AppState extends ChangeNotifier {
   bool isSyncing = false;
   int pendingSyncCount = 0;
 
-  // Day-End Finalization State (Section 3 Requirement)
+  // Day-End Finalization State & Day Start Freeze
   bool isDayEndFinalized = false;
   DateTime? dayEndFinalizedAt;
+  bool isCheckingDayEndStatus = false;
+  bool isRequestingDayStartOtp = false;
+  bool isVerifyingDayStartOtp = false;
+  bool dayStartOtpDispatched = false;
+  String? dayStartError;
 
   // Master Data
   final List<Customer> _customers = [];
@@ -351,6 +371,8 @@ class AppState extends ChangeNotifier {
         // Auto-connect device hardware GPS immediately upon login for field collectors (Admin does not require GPS)
         if (!currentUser.isAdmin) {
           requestAndConnectGps();
+          // Check Day-End status & Freeze for field collector
+          await checkDayEndStatus();
         }
 
         // Audit Log entry
@@ -810,7 +832,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> fetchNextSuggestedReceiptNo() async {
     try {
-      final response = await http.get(Uri.parse('$apiBaseUrl/receipts/next-number')).timeout(const Duration(seconds: 4));
+      final prefix = userReceiptPrefix;
+      final response = await http.get(Uri.parse('$apiBaseUrl/receipts/next-number?prefix=$prefix')).timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['nextReceiptNo'] != null) {
@@ -824,13 +847,16 @@ class AppState extends ChangeNotifier {
   String _generateSuggestedManualReceiptNo() {
     int maxNum = 26450;
     for (final r in _receipts) {
-      final parts = r.manualReceiptNo.replaceAll('MR-', '');
-      final parsed = int.tryParse(parts);
-      if (parsed != null && parsed > maxNum) {
-        maxNum = parsed;
+      final match = RegExp(r'\d+').firstMatch(r.manualReceiptNo);
+      if (match != null) {
+        final parsed = int.tryParse(match.group(0)!);
+        if (parsed != null && parsed > maxNum) {
+          maxNum = parsed;
+        }
       }
     }
-    return 'MR-${(maxNum + 1).toString().padLeft(6, '0')}';
+    final prefix = userReceiptPrefix;
+    return '$prefix-${(maxNum + 1).toString().padLeft(6, '0')}';
   }
 
   void setDraftPaymentAmount(double amount) {
@@ -854,10 +880,26 @@ class AppState extends ChangeNotifier {
     required String? chequeNumber,
     required DateTime? chequeDate,
   }) {
-    draftBank = bank;
-    draftBranch = branch;
     draftChequeNumber = chequeNumber;
     draftChequeDate = chequeDate;
+
+    // Auto-extract bank and branch codes from full cheque number if available
+    if (chequeNumber != null && chequeNumber.isNotEmpty) {
+      final digits = chequeNumber.replaceAll(RegExp(r'\D'), '');
+      if (digits.length > 6) {
+        draftBank = digits.substring(6, digits.length.clamp(6, 10));
+      } else {
+        draftBank = bank;
+      }
+      if (digits.length > 10) {
+        draftBranch = digits.substring(10, digits.length.clamp(10, 13));
+      } else {
+        draftBranch = branch;
+      }
+    } else {
+      draftBank = bank;
+      draftBranch = branch;
+    }
     notifyListeners();
   }
 
@@ -939,12 +981,6 @@ class AppState extends ChangeNotifier {
       return 'Manual receipt number "$draftManualReceiptNo" has already been used. Numbers must be unique and cannot be reused.';
     }
     if (draftPaymentMethod == PaymentMethod.cheque) {
-      if (draftBank == null || draftBank!.trim().isEmpty) {
-        return 'Bank name is mandatory for cheque payment.';
-      }
-      if (draftBranch == null || draftBranch!.trim().isEmpty) {
-        return 'Branch name is mandatory for cheque payment.';
-      }
       if (draftChequeNumber == null || draftChequeNumber!.trim().isEmpty) {
         return 'Cheque number is mandatory for cheque payment.';
       }
@@ -1053,7 +1089,7 @@ class AppState extends ChangeNotifier {
       chequeDate: draftChequeDate,
       totalAmount: draftPaymentAmount,
       allocatedInvoices: items,
-      comments: draftComments,
+      comments: draftComments.trim(),
       isAdvancePayment: items.isEmpty,
       collectorId: collectorId,
       collectorName: collectorName,
@@ -1174,6 +1210,14 @@ class AppState extends ChangeNotifier {
       if (r.isCancelled) return false;
       if (r.createdAt.isBefore(startOfDay) || r.createdAt.isAfter(endOfDay)) return false;
 
+      // Normal collectors can ONLY calculate day-end for their own collections
+      if (!isAdmin) {
+        final myId = collectorId.trim().toLowerCase();
+        final myUsername = currentUser.username.trim().toLowerCase();
+        final rId = r.collectorId.trim().toLowerCase();
+        return rId == myId || rId == myUsername;
+      }
+
       // Filter by user's assigned locations (if ALL locations assigned, display all payments)
       if (currentUser.hasAllLocations) {
         return true;
@@ -1219,10 +1263,74 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  // Finalize Day-End: locks payment recording for today (Section 3)
-  void finalizeDayEndSummary(String notes) {
+  // Check if Day-End was previously finalized for this collector
+  Future<void> checkDayEndStatus({bool forceServer = false}) async {
+    if (currentUser.isAdmin) {
+      isDayEndFinalized = false;
+      dayEndFinalizedAt = null;
+      notifyListeners();
+      return;
+    }
+
+    isCheckingDayEndStatus = true;
+    try {
+      // 1. First check local storage
+      final prefs = await SharedPreferences.getInstance();
+      final localFinalized = prefs.getBool('day_end_finalized_${currentUser.collectorId}') ?? false;
+      final localFinalizedAtStr = prefs.getString('day_end_finalized_at_${currentUser.collectorId}');
+      if (localFinalized) {
+        isDayEndFinalized = true;
+        if (localFinalizedAtStr != null) {
+          dayEndFinalizedAt = DateTime.tryParse(localFinalizedAtStr) ?? DateTime.now();
+        }
+        notifyListeners();
+      }
+
+      // 2. Query backend API status
+      final response = await http.get(
+        Uri.parse('$apiBaseUrl/dayend/status/${currentUser.collectorId}'),
+      ).timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final bool serverFinalized = data['isFinalized'] == true;
+        isDayEndFinalized = serverFinalized;
+        if (data['finalizedAt'] != null) {
+          dayEndFinalizedAt = DateTime.tryParse(data['finalizedAt'].toString()) ?? DateTime.now();
+        } else if (!serverFinalized) {
+          dayEndFinalizedAt = null;
+        }
+
+        // Update local cache
+        await prefs.setBool('day_end_finalized_${currentUser.collectorId}', serverFinalized);
+        if (dayEndFinalizedAt != null) {
+          await prefs.setString('day_end_finalized_at_${currentUser.collectorId}', dayEndFinalizedAt!.toIso8601String());
+        } else {
+          await prefs.remove('day_end_finalized_at_${currentUser.collectorId}');
+        }
+      }
+    } catch (e) {
+      debugPrint('[checkDayEndStatus Error]: $e');
+    } finally {
+      isCheckingDayEndStatus = false;
+      notifyListeners();
+    }
+  }
+
+  // Finalize Day-End: locks payment recording and freezes app for this user
+  Future<void> finalizeDayEndSummary(String notes) async {
     isDayEndFinalized = true;
     dayEndFinalizedAt = DateTime.now();
+    dayStartOtpDispatched = false;
+    dayStartError = null;
+
+    final summary = calculateDayEndSummary(dayEndFinalizedAt!);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('day_end_finalized_${currentUser.collectorId}', true);
+      await prefs.setString('day_end_finalized_at_${currentUser.collectorId}', dayEndFinalizedAt!.toIso8601String());
+    } catch (_) {}
 
     _auditLogs.insert(0, AuditLog(
       id: 'AUD-${DateTime.now().millisecondsSinceEpoch}',
@@ -1235,12 +1343,159 @@ class AppState extends ChangeNotifier {
     ));
 
     notifyListeners();
+
+    // Call backend API to record finalized status in SQL Server
+    try {
+      await http.post(
+        Uri.parse('$apiBaseUrl/dayend/finalize'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'date': dayEndFinalizedAt!.toIso8601String(),
+          'collectorId': currentUser.collectorId,
+          'collectorName': currentUser.fullName,
+          'totalCash': summary.totalCash,
+          'totalCheque': summary.totalCheque,
+          'totalIncome': summary.totalIncome,
+          'totalReceiptsCount': summary.totalReceiptsCount,
+          'cashierNotes': notes,
+        }),
+      ).timeout(const Duration(seconds: 8));
+    } catch (e) {
+      debugPrint('[finalizeDayEndSummary Backend Error]: $e');
+    }
+  }
+
+  // Request OTP from Management to perform Day Start
+  Future<bool> requestDayStartOtp() async {
+    isRequestingDayStartOtp = true;
+    dayStartError = null;
+    notifyListeners();
+
+    try {
+      final response = await http.post(
+        Uri.parse('$apiBaseUrl/otp/generate'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'collectorId': currentUser.collectorId,
+          'customerCode': 'DAY_START',
+          'customerName': '${currentUser.fullName} Day Start',
+        }),
+      ).timeout(const Duration(seconds: 8));
+
+      isRequestingDayStartOtp = false;
+      if (response.statusCode == 200) {
+        dayStartOtpDispatched = true;
+        notifyListeners();
+        return true;
+      } else {
+        dayStartError = 'Failed to request OTP from server.';
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      isRequestingDayStartOtp = false;
+      dayStartError = 'Error requesting OTP: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Start Day with Verified OTP
+  Future<bool> startDayWithOtp(String otpCode) async {
+    final trimmedOtp = otpCode.trim();
+    if (trimmedOtp.length != 6) {
+      dayStartError = 'Please enter a valid 6-digit OTP.';
+      notifyListeners();
+      return false;
+    }
+
+    isVerifyingDayStartOtp = true;
+    dayStartError = null;
+    notifyListeners();
+
+    try {
+      // 1. Verify OTP with Backend
+      final verifyResponse = await http.post(
+        Uri.parse('$apiBaseUrl/otp/verify'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'collectorId': currentUser.collectorId,
+          'otpCode': trimmedOtp,
+        }),
+      ).timeout(const Duration(seconds: 8));
+
+      if (verifyResponse.statusCode != 200) {
+        try {
+          final body = jsonDecode(verifyResponse.body);
+          dayStartError = body['message'] ?? 'Invalid or expired OTP code.';
+        } catch (_) {
+          dayStartError = 'Invalid or expired OTP code.';
+        }
+        isVerifyingDayStartOtp = false;
+        notifyListeners();
+        return false;
+      }
+
+      // 2. Notify backend that day has started
+      try {
+        await http.post(
+          Uri.parse('$apiBaseUrl/dayend/start'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'collectorId': currentUser.collectorId,
+          }),
+        ).timeout(const Duration(seconds: 8));
+      } catch (_) {}
+
+      // 3. Clear local freeze state
+      isDayEndFinalized = false;
+      dayEndFinalizedAt = null;
+      dayStartOtpDispatched = false;
+      dayStartError = null;
+      isVerifyingDayStartOtp = false;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('day_end_finalized_${currentUser.collectorId}');
+      await prefs.remove('day_end_finalized_at_${currentUser.collectorId}');
+
+      _auditLogs.insert(0, AuditLog(
+        id: 'AUD-${DateTime.now().millisecondsSinceEpoch}',
+        action: 'DAY_START_AUTHORIZED',
+        referenceNo: 'DAY-START-${DateTime.now().millisecondsSinceEpoch}',
+        collectorId: collectorId,
+        collectorName: collectorName,
+        details: 'Day started and unlocked with OTP authorization.',
+        timestamp: DateTime.now(),
+      ));
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      isVerifyingDayStartOtp = false;
+      dayStartError = 'Verification failed: $e';
+      notifyListeners();
+      return false;
+    }
   }
 
   // Manual unlock for admin/testing
-  void unlockDayEndForTesting() {
+  Future<void> unlockDayEndForTesting() async {
     isDayEndFinalized = false;
     dayEndFinalizedAt = null;
+    dayStartOtpDispatched = false;
+    dayStartError = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('day_end_finalized_${currentUser.collectorId}');
+      await prefs.remove('day_end_finalized_at_${currentUser.collectorId}');
+      await http.post(
+        Uri.parse('$apiBaseUrl/dayend/start'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'collectorId': currentUser.collectorId,
+        }),
+      ).timeout(const Duration(seconds: 6));
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -1266,5 +1521,57 @@ class AppState extends ChangeNotifier {
     ));
 
     notifyListeners();
+  }
+
+  // --- OTP Access for Protected Operations (e.g. POS Statement Print for Normal Users) ---
+  /// Generates a new OTP for protected operations and saves to LastGeneratedOtp table
+  Future<Map<String, dynamic>> generateStatementOtp(Customer customer) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/otp/generate'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'collectorId': currentUser.collectorId,
+          'customerCode': customer.code,
+          'customerName': customer.name,
+        }),
+      ).timeout(const Duration(seconds: 5));
+
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to generate OTP: ${res.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Network error: $e',
+      };
+    }
+  }
+
+  /// Verifies entered OTP against LastGeneratedOtp table in database
+  Future<Map<String, dynamic>> verifyStatementOtp(String otpCode) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/otp/verify'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'collectorId': currentUser.collectorId,
+          'otpCode': otpCode.trim(),
+        }),
+      ).timeout(const Duration(seconds: 5));
+
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return data;
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Verification network error: $e',
+      };
+    }
   }
 }
