@@ -19,6 +19,12 @@ if (!(Test-Path $webDest)) {
 }
 
 Copy-Item -Path "$webSource\*" -Destination $webDest -Recurse -Force -ErrorAction SilentlyContinue
+
+# Ensure IIS index.html uses base href "/jaypharma/" for IIS sub-application
+$destIndex = Join-Path $webDest "index.html"
+if (Test-Path $destIndex) {
+    (Get-Content $destIndex) -replace '<base href="/">', '<base href="/jaypharma/">' | Set-Content $destIndex -Encoding utf8
+}
 Write-Host "[OK] Web App copied successfully." -ForegroundColor Green
 
 # 2. Deploy Release APK to IIS web directory for mobile download
