@@ -44,8 +44,75 @@ app.MapGet("/", () => Results.Redirect("/swagger"));
 string connectionString = builder.Configuration.GetConnectionString("JayPharmaDB") 
     ?? "Server=220.247.236.89,1931;Database=JayPharmaApp;User Id=CeylonHQ;Password=Prison12!;TrustServerCertificate=True;Connect Timeout=30;";
 
-string mainErpConnectionString = builder.Configuration.GetConnectionString("MainERP")
-    ?? "Data Source=220.247.236.89,5000;Initial Catalog=JayPharma;Persist Security Info=True;User ID=CeylonTest;Password=Prison12!;TrustServerCertificate=True;Connect Timeout=30;";
+string mainErpConnectionStringFallback = builder.Configuration.GetConnectionString("MainERP")
+    ?? "Data Source=124.43.179.134,49172;Initial Catalog=JayPharma;Persist Security Info=True;User ID=WCeylon;Password=Prison12!;TrustServerCertificate=True;Connect Timeout=30;";
+
+string? cachedMainErpConnStr = null;
+DateTime lastMainErpConnStrFetch = DateTime.MinValue;
+var connStrLock = new object();
+
+async Task<string> GetMainErpConnectionStringAsync(bool forceRefresh = false)
+{
+    lock (connStrLock)
+    {
+        if (!forceRefresh && cachedMainErpConnStr != null && (DateTime.UtcNow - lastMainErpConnStrFetch).TotalSeconds < 15)
+        {
+            return cachedMainErpConnStr;
+        }
+    }
+
+    try
+    {
+        using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT TOP 1 ConnectionString, ServerAddress, DatabaseName, Username, Password, IsActive 
+            FROM MainDatabaseConfig 
+            WHERE IsActive = 1 
+            ORDER BY Id DESC";
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            var raw = reader["ConnectionString"]?.ToString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                if (!raw.Contains("TrustServerCertificate", StringComparison.OrdinalIgnoreCase))
+                    raw += ";TrustServerCertificate=True";
+                if (!raw.Contains("Connect Timeout", StringComparison.OrdinalIgnoreCase))
+                    raw += ";Connect Timeout=30";
+
+                lock (connStrLock)
+                {
+                    cachedMainErpConnStr = raw;
+                    lastMainErpConnStrFetch = DateTime.UtcNow;
+                }
+                return raw;
+            }
+
+            var srv = reader["ServerAddress"]?.ToString()?.Trim();
+            var db = reader["DatabaseName"]?.ToString()?.Trim();
+            var user = reader["Username"]?.ToString()?.Trim();
+            var pwd = reader["Password"]?.ToString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(srv) && !string.IsNullOrWhiteSpace(db))
+            {
+                var built = $"Data Source={srv};Initial Catalog={db};User ID={user};Password={pwd};Persist Security Info=True;TrustServerCertificate=True;Connect Timeout=30;";
+                lock (connStrLock)
+                {
+                    cachedMainErpConnStr = built;
+                    lastMainErpConnStrFetch = DateTime.UtcNow;
+                }
+                return built;
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[MainDatabaseConfig Load Error]: {ex.Message}");
+    }
+
+    return mainErpConnectionStringFallback;
+}
 
 // 1. Health check & DB Status
 app.MapGet("/api/health", async () =>
@@ -54,6 +121,7 @@ app.MapGet("/api/health", async () =>
     var mainErpOk = false;
     string? appDbError = null;
     string? mainErpError = null;
+    string activeErpConn = mainErpConnectionStringFallback;
 
     try
     {
@@ -65,7 +133,8 @@ app.MapGet("/api/health", async () =>
 
     try
     {
-        using var erpConn = new SqlConnection(mainErpConnectionString);
+        activeErpConn = await GetMainErpConnectionStringAsync(forceRefresh: true);
+        using var erpConn = new SqlConnection(activeErpConn);
         await erpConn.OpenAsync();
         mainErpOk = true;
     }
@@ -76,9 +145,75 @@ app.MapGet("/api/health", async () =>
         status = (appDbOk && mainErpOk) ? "ONLINE" : (appDbOk || mainErpOk ? "PARTIAL" : "OFFLINE"), 
         appDatabase = appDbOk ? "CONNECTED" : appDbError, 
         mainErpDatabase = mainErpOk ? "CONNECTED" : mainErpError,
+        mainErpSource = activeErpConn.Contains("124.43.179.134") ? "LIVE_ERP (124.43.179.134)" : (activeErpConn.Contains("220.247.236.89") ? "OLD_ERP (220.247.236.89)" : "CONFIGURED_ERP"),
         realtime = true,
         timestamp = DateTime.UtcNow 
     });
+});
+
+// 1b. Main Database Configuration & Diagnostic Status
+app.MapGet("/api/config/main-database", async () =>
+{
+    var result = new Dictionary<string, object?>();
+    string? activeConnStr = null;
+
+    try
+    {
+        using var appConn = new SqlConnection(connectionString);
+        await appConn.OpenAsync();
+        using var cmd = appConn.CreateCommand();
+        cmd.CommandText = "SELECT TOP 1 Id, ConfigName, ServerAddress, DatabaseName, Username, ProviderType, IsActive, ConnectionString, UpdatedAt FROM MainDatabaseConfig WHERE IsActive = 1 ORDER BY Id DESC";
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            result["configId"] = reader["Id"];
+            result["configName"] = reader["ConfigName"]?.ToString();
+            result["serverAddress"] = reader["ServerAddress"]?.ToString();
+            result["databaseName"] = reader["DatabaseName"]?.ToString();
+            result["username"] = reader["Username"]?.ToString();
+            result["isActive"] = reader["IsActive"];
+            result["updatedAt"] = reader["UpdatedAt"];
+            activeConnStr = reader["ConnectionString"]?.ToString();
+        }
+    }
+    catch (Exception ex)
+    {
+        result["configLoadError"] = ex.Message;
+    }
+
+    if (string.IsNullOrWhiteSpace(activeConnStr))
+    {
+        activeConnStr = await GetMainErpConnectionStringAsync(forceRefresh: true);
+    }
+
+    var testResult = new Dictionary<string, object?>();
+    try
+    {
+        using var erpConn = new SqlConnection(activeConnStr);
+        await erpConn.OpenAsync();
+        testResult["connected"] = true;
+
+        var tables = new List<string>();
+        using var tblCmd = erpConn.CreateCommand();
+        tblCmd.CommandText = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME IN ('Invoice', 'AppInvoice', 'DPay', 'Customers', 'Customer')";
+        using var tblReader = await tblCmd.ExecuteReaderAsync();
+        while (await tblReader.ReadAsync())
+        {
+            tables.Add(tblReader[0].ToString()!);
+        }
+        testResult["detectedTables"] = tables;
+        testResult["canReadInvoices"] = tables.Contains("Invoice");
+        testResult["canWriteAppInvoice"] = tables.Contains("AppInvoice");
+        testResult["canWriteDPay"] = tables.Contains("DPay");
+    }
+    catch (Exception ex)
+    {
+        testResult["connected"] = false;
+        testResult["error"] = ex.Message;
+    }
+
+    result["connectionTest"] = testResult;
+    return Results.Ok(result);
 });
 
 // 2. User/Collector Login & Access Control
@@ -242,10 +377,11 @@ app.MapGet("/api/customers", async (string? search, IMemoryCache cache) =>
         return Results.Ok(cachedList);
     }
 
-    // Try Realtime from Main ERP (JayPharma on port 5000)
+    // Try Realtime from Main ERP
     try
     {
-        using var erpConn = new SqlConnection(mainErpConnectionString);
+        var mainErpConnStr = await GetMainErpConnectionStringAsync();
+        using var erpConn = new SqlConnection(mainErpConnStr);
         await erpConn.OpenAsync();
 
         using var cmd = erpConn.CreateCommand();
@@ -422,7 +558,8 @@ app.MapGet("/api/customers/{code}/invoices", async (string code) =>
     // Try Realtime from Main ERP
     try
     {
-        using var erpConn = new SqlConnection(mainErpConnectionString);
+        var mainErpConnStr = await GetMainErpConnectionStringAsync();
+        using var erpConn = new SqlConnection(mainErpConnStr);
         await erpConn.OpenAsync();
 
         using var cmd = erpConn.CreateCommand();
@@ -613,7 +750,8 @@ app.MapGet("/api/receipts/verify-unique/{receiptNo}", async (string receiptNo) =
         {
             try
             {
-                using var erpConn = new SqlConnection(mainErpConnectionString);
+                var mainErpConnStr = await GetMainErpConnectionStringAsync();
+                using var erpConn = new SqlConnection(mainErpConnStr);
                 await erpConn.OpenAsync();
                 using var erpCmd = erpConn.CreateCommand();
                 erpCmd.CommandText = "SELECT COUNT(1) FROM DPay WHERE MRNo = @mr";
@@ -654,7 +792,8 @@ app.MapGet("/api/receipts/next-number", async (string? prefix) =>
 
     try
     {
-        using var erpConn = new SqlConnection(mainErpConnectionString);
+        var mainErpConnStr = await GetMainErpConnectionStringAsync();
+        using var erpConn = new SqlConnection(mainErpConnStr);
         await erpConn.OpenAsync();
         using var erpCmd = erpConn.CreateCommand();
         erpCmd.CommandText = "SELECT Other1 FROM AppInvoice";
@@ -887,10 +1026,11 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
 
         tx.Commit();
 
-        // 5. REALTIME SYNC TO MAIN ERP (JayPharma on Port 5000)
+        // 5. REALTIME SYNC TO MAIN ERP (from MainDatabaseConfig)
         try
         {
-            using var erpConn = new SqlConnection(mainErpConnectionString);
+            var mainErpConnStr = await GetMainErpConnectionStringAsync();
+            using var erpConn = new SqlConnection(mainErpConnStr);
             await erpConn.OpenAsync();
 
             int numericReceiptNo = 0;
@@ -1037,6 +1177,217 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
     {
         tx.Rollback();
         return Results.Json(new { success = false, error = ex.Message }, statusCode: 500);
+    }
+});
+
+// 6b. Resync past receipts from JayPharmaApp to Main ERP (AppInvoice & DPay)
+app.MapPost("/api/receipts/resync-to-erp", async () =>
+{
+    var mainErpConnStr = await GetMainErpConnectionStringAsync(forceRefresh: true);
+    int syncedCount = 0;
+    var skippedCount = 0;
+
+    try
+    {
+        using var appConn = new SqlConnection(connectionString);
+        await appConn.OpenAsync();
+
+        using var erpConn = new SqlConnection(mainErpConnStr);
+        await erpConn.OpenAsync();
+
+        using var cmd = appConn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT r.ManualReceiptNo, r.CustomerCode, r.CustomerName, r.CustomerAddress, r.CustomerPhone,
+                   r.PaymentMethod, r.Bank, r.Branch, r.ChequeNumber, r.ChequeDate, r.TotalAmount,
+                   r.Comments, r.IsAdvancePayment, r.CollectorId, r.CollectorName,
+                   r.Latitude, r.Longitude, r.LocationAddress, r.CreatedAt
+            FROM Receipts r
+            ORDER BY r.CreatedAt ASC";
+
+        var receipts = new List<dynamic>();
+        using (var reader = await cmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                receipts.Add(new
+                {
+                    ManualReceiptNo = reader["ManualReceiptNo"].ToString()!,
+                    CustomerCode = reader["CustomerCode"].ToString()!,
+                    CustomerName = reader["CustomerName"]?.ToString() ?? "",
+                    CustomerAddress = reader["CustomerAddress"]?.ToString() ?? "",
+                    PaymentMethod = reader["PaymentMethod"]?.ToString() ?? "CASH",
+                    Bank = reader["Bank"] != DBNull.Value ? reader["Bank"].ToString() : null,
+                    Branch = reader["Branch"] != DBNull.Value ? reader["Branch"].ToString() : null,
+                    ChequeNumber = reader["ChequeNumber"] != DBNull.Value ? reader["ChequeNumber"].ToString() : null,
+                    ChequeDate = reader["ChequeDate"] != DBNull.Value ? (DateTime?)reader["ChequeDate"] : null,
+                    TotalAmount = Convert.ToDouble(reader["TotalAmount"]),
+                    Comments = reader["Comments"] != DBNull.Value ? reader["Comments"].ToString() : "",
+                    CollectorName = reader["CollectorName"]?.ToString() ?? "Collector",
+                    LocationAddress = reader["LocationAddress"] != DBNull.Value ? reader["LocationAddress"].ToString() : "",
+                    Latitude = reader["Latitude"] != DBNull.Value ? Convert.ToDouble(reader["Latitude"]) : 0.0,
+                    Longitude = reader["Longitude"] != DBNull.Value ? Convert.ToDouble(reader["Longitude"]) : 0.0,
+                    CreatedAt = Convert.ToDateTime(reader["CreatedAt"])
+                });
+            }
+        }
+
+        foreach (var r in receipts)
+        {
+            string mrNo = r.ManualReceiptNo;
+
+            using var chkCmd = erpConn.CreateCommand();
+            chkCmd.CommandText = "SELECT COUNT(1) FROM dbo.AppInvoice WHERE Other1 = @mr";
+            chkCmd.Parameters.AddWithValue("@mr", mrNo);
+            int exists = Convert.ToInt32(await chkCmd.ExecuteScalarAsync());
+            if (exists > 0)
+            {
+                skippedCount++;
+                continue;
+            }
+
+            var invs = new List<dynamic>();
+            using (var invCmd = appConn.CreateCommand())
+            {
+                invCmd.CommandText = "SELECT InvoiceNo, InvoiceAmount, AmountSettled, RemainingBalance FROM ReceiptInvoices WHERE ManualReceiptNo = @mr ORDER BY ItemIndex";
+                invCmd.Parameters.AddWithValue("@mr", mrNo);
+                using var invReader = await invCmd.ExecuteReaderAsync();
+                while (await invReader.ReadAsync())
+                {
+                    invs.Add(new
+                    {
+                        InvoiceNo = invReader["InvoiceNo"].ToString()!,
+                        InvoiceAmount = Convert.ToDouble(invReader["InvoiceAmount"]),
+                        AmountSettled = Convert.ToDouble(invReader["AmountSettled"]),
+                        RemainingBalance = Convert.ToDouble(invReader["RemainingBalance"])
+                    });
+                }
+            }
+
+            int numericReceiptNo = 0;
+            var numMatch = Regex.Match(mrNo, @"\d+");
+            if (numMatch.Success) int.TryParse(numMatch.Value, out numericReceiptNo);
+
+            int numericCustCode = 0;
+            int.TryParse(r.CustomerCode, out numericCustCode);
+
+            string resolvedLocation = !string.IsNullOrWhiteSpace(r.LocationAddress)
+                ? r.LocationAddress.Trim()
+                : (r.Latitude != 0 && r.Longitude != 0 ? $"GPS: {r.Latitude:F6}, {r.Longitude:F6}" : "Jay Pharma");
+            if (resolvedLocation.Length > 250) resolvedLocation = resolvedLocation.Substring(0, 250);
+
+            string resolvedBranch = !string.IsNullOrWhiteSpace(r.Branch) 
+                ? r.Branch.Trim() 
+                : (resolvedLocation.Length > 100 ? resolvedLocation.Substring(0, 100) : resolvedLocation);
+
+            if (invs.Count > 0)
+            {
+                foreach (var item in invs)
+                {
+                    if (int.TryParse(item.InvoiceNo, out int invNoInt))
+                    {
+                        using var appInvCmd = erpConn.CreateCommand();
+                        appInvCmd.CommandText = @"
+                            INSERT INTO dbo.AppInvoice 
+                            (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
+                             PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
+                            VALUES 
+                            (@inv, @date, @cCode, @cName, @inVal, @setAmt, 'Jay Pharma', @settleType, 0, @remBal, @totAmt, @mrNo, @details,
+                             @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
+
+                        appInvCmd.Parameters.AddWithValue("@inv", invNoInt);
+                        appInvCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
+                        appInvCmd.Parameters.AddWithValue("@cCode", numericCustCode);
+                        appInvCmd.Parameters.AddWithValue("@cName", r.CustomerName);
+                        appInvCmd.Parameters.AddWithValue("@inVal", item.InvoiceAmount);
+                        appInvCmd.Parameters.AddWithValue("@setAmt", item.AmountSettled);
+                        appInvCmd.Parameters.AddWithValue("@settleType", item.RemainingBalance <= 0.01 ? "Settled" : "Part Settled");
+                        appInvCmd.Parameters.AddWithValue("@remBal", item.RemainingBalance);
+                        appInvCmd.Parameters.AddWithValue("@totAmt", r.TotalAmount);
+                        appInvCmd.Parameters.AddWithValue("@mrNo", mrNo);
+                        appInvCmd.Parameters.AddWithValue("@details", $"Resync Collector: {r.CollectorName}");
+                        appInvCmd.Parameters.AddWithValue("@payType", string.IsNullOrWhiteSpace(r.PaymentMethod) ? "CASH" : r.PaymentMethod.Trim());
+                        appInvCmd.Parameters.AddWithValue("@bank", r.Bank ?? "");
+                        appInvCmd.Parameters.AddWithValue("@chqBranch", resolvedBranch);
+                        appInvCmd.Parameters.AddWithValue("@chqNo", r.ChequeNumber ?? "");
+                        appInvCmd.Parameters.AddWithValue("@chqDate", r.ChequeDate != null ? (object)((DateTime)r.ChequeDate).Date : DBNull.Value);
+                        appInvCmd.Parameters.AddWithValue("@det1", r.Comments ?? "");
+                        appInvCmd.Parameters.AddWithValue("@det2", resolvedLocation);
+                        appInvCmd.Parameters.AddWithValue("@det3", "");
+                        await appInvCmd.ExecuteNonQueryAsync();
+
+                        using var dpayCmd = erpConn.CreateCommand();
+                        dpayCmd.CommandText = @"
+                            DECLARE @newRNo INT = (SELECT ISNULL(MAX(RNo), 0) + 1 FROM DPay);
+                            INSERT INTO DPay (RNo, Date, InvNo, CCode, Name, Branch, Details, Amount, ShEx, Type, CheNo, PDDate, [Check], Audit, MRNo)
+                            VALUES (@newRNo, @date, @inv, @cCode, @cName, 'Jay Pharma', @details, @amount, 0, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
+
+                        dpayCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
+                        dpayCmd.Parameters.AddWithValue("@inv", invNoInt);
+                        dpayCmd.Parameters.AddWithValue("@cCode", numericCustCode);
+                        dpayCmd.Parameters.AddWithValue("@cName", r.CustomerName);
+                        dpayCmd.Parameters.AddWithValue("@details", $"Resync Payment by {r.CollectorName}");
+                        dpayCmd.Parameters.AddWithValue("@amount", item.AmountSettled);
+                        dpayCmd.Parameters.AddWithValue("@type", r.PaymentMethod.Equals("CHEQUE", StringComparison.OrdinalIgnoreCase) ? "Cheque" : "Cash");
+                        dpayCmd.Parameters.AddWithValue("@cheNo", (object?)r.ChequeNumber ?? "");
+                        dpayCmd.Parameters.AddWithValue("@pdDate", r.ChequeDate != null ? ((DateTime)r.ChequeDate).ToString("dd/MM/yyyy") : "");
+                        dpayCmd.Parameters.AddWithValue("@mrNo", numericReceiptNo);
+                        await dpayCmd.ExecuteNonQueryAsync();
+                    }
+                }
+            }
+            else if (r.TotalAmount > 0)
+            {
+                using var appInvCmd = erpConn.CreateCommand();
+                appInvCmd.CommandText = @"
+                    INSERT INTO dbo.AppInvoice 
+                    (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
+                     PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
+                    VALUES 
+                    (0, @date, @cCode, @cName, 0, @setAmt, 'Jay Pharma', 'Advance', 0, 0, @totAmt, @mrNo, @details,
+                     @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
+
+                appInvCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
+                appInvCmd.Parameters.AddWithValue("@cCode", numericCustCode);
+                appInvCmd.Parameters.AddWithValue("@cName", r.CustomerName);
+                appInvCmd.Parameters.AddWithValue("@setAmt", r.TotalAmount);
+                appInvCmd.Parameters.AddWithValue("@totAmt", r.TotalAmount);
+                appInvCmd.Parameters.AddWithValue("@mrNo", mrNo);
+                appInvCmd.Parameters.AddWithValue("@details", $"Resync Advance | Collector: {r.CollectorName}");
+                appInvCmd.Parameters.AddWithValue("@payType", string.IsNullOrWhiteSpace(r.PaymentMethod) ? "CASH" : r.PaymentMethod.Trim());
+                appInvCmd.Parameters.AddWithValue("@bank", r.Bank ?? "");
+                appInvCmd.Parameters.AddWithValue("@chqBranch", resolvedBranch);
+                appInvCmd.Parameters.AddWithValue("@chqNo", r.ChequeNumber ?? "");
+                appInvCmd.Parameters.AddWithValue("@chqDate", r.ChequeDate != null ? (object)((DateTime)r.ChequeDate).Date : DBNull.Value);
+                appInvCmd.Parameters.AddWithValue("@det1", r.Comments ?? "");
+                appInvCmd.Parameters.AddWithValue("@det2", resolvedLocation);
+                appInvCmd.Parameters.AddWithValue("@det3", "");
+                await appInvCmd.ExecuteNonQueryAsync();
+
+                using var dpayCmd = erpConn.CreateCommand();
+                dpayCmd.CommandText = @"
+                    DECLARE @newRNo INT = (SELECT ISNULL(MAX(RNo), 0) + 1 FROM DPay);
+                    INSERT INTO DPay (RNo, Date, InvNo, CCode, Name, Branch, Details, Amount, ShEx, Type, CheNo, PDDate, [Check], Audit, MRNo)
+                    VALUES (@newRNo, @date, 0, @cCode, @cName, 'Jay Pharma', @details, @amount, 0, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
+
+                dpayCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
+                dpayCmd.Parameters.AddWithValue("@cCode", numericCustCode);
+                dpayCmd.Parameters.AddWithValue("@cName", r.CustomerName);
+                dpayCmd.Parameters.AddWithValue("@details", $"Resync Advance by {r.CollectorName}");
+                dpayCmd.Parameters.AddWithValue("@amount", r.TotalAmount);
+                dpayCmd.Parameters.AddWithValue("@type", r.PaymentMethod.Equals("CHEQUE", StringComparison.OrdinalIgnoreCase) ? "Cheque" : "Cash");
+                dpayCmd.Parameters.AddWithValue("@cheNo", (object?)r.ChequeNumber ?? "");
+                dpayCmd.Parameters.AddWithValue("@pdDate", r.ChequeDate != null ? ((DateTime)r.ChequeDate).ToString("dd/MM/yyyy") : "");
+                dpayCmd.Parameters.AddWithValue("@mrNo", numericReceiptNo);
+                await dpayCmd.ExecuteNonQueryAsync();
+            }
+            syncedCount++;
+        }
+
+        return Results.Ok(new { success = true, syncedCount, skippedCount, total = receipts.Count });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { success = false, syncedCount, skippedCount, error = ex.Message }, statusCode: 500);
     }
 });
 
