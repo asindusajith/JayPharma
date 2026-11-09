@@ -146,18 +146,6 @@ class BluetoothPrinterService {
           if (kDebugMode) print('[Bluetooth] Native bondedDevices error: $e');
         }
       }
-                      address: address,
-                      isConnected: isCur,
-                    );
-                  }
-                }
-              }
-            }
-          }
-        } catch (e) {
-          if (kDebugMode) print('[Bluetooth] Native bondedDevices error: $e');
-        }
-      }
 
       // 3. If a saved printer exists but wasn't found in current scan, retain it
       if (savedMac != null && savedMac.isNotEmpty && !deviceMap.containsKey(savedMac)) {
