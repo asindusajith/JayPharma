@@ -736,14 +736,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             onPressed: () async {
-                              final uri = Uri.parse('https://github.com/asindusajith/JayPharma/releases/latest/download/app-release.apk');
+                              final serverApkUrl = '${appState.apiBaseUrl}/app/download-apk';
+                              final githubUrl = 'https://github.com/asindusajith/JayPharma/releases/latest/download/app-release.apk';
                               try {
-                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                final uri = Uri.parse(serverApkUrl);
+                                final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                if (!launched) {
+                                  await launchUrl(Uri.parse(githubUrl), mode: LaunchMode.externalApplication);
+                                }
                               } catch (e) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Could not open download link: $e')),
-                                  );
+                                try {
+                                  await launchUrl(Uri.parse(githubUrl), mode: LaunchMode.externalApplication);
+                                } catch (e2) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Could not open download link: $e2')),
+                                    );
+                                  }
                                 }
                               }
                             },

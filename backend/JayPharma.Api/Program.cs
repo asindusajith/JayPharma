@@ -216,6 +216,27 @@ app.MapGet("/api/config/main-database", async () =>
     return Results.Ok(result);
 });
 
+// Direct APK Download Endpoint (High-speed server hosted APK)
+app.MapGet("/api/app/download-apk", (IWebHostEnvironment env) =>
+{
+    var candidates = new[]
+    {
+        Path.Combine(env.ContentRootPath, "JayPharma-release.apk"),
+        Path.Combine(env.ContentRootPath, "..", "..", "JayPharma-release.apk"),
+        Path.Combine(env.ContentRootPath, "..", "..", "build", "app", "outputs", "flutter-apk", "app-release.apk"),
+        Path.Combine(AppContext.BaseDirectory, "JayPharma-release.apk")
+    };
+
+    foreach (var path in candidates)
+    {
+        if (File.Exists(path))
+        {
+            return Results.File(path, "application/vnd.android.package-archive", "JayPharma-release.apk", enableRangeProcessing: true);
+        }
+    }
+    return Results.NotFound(new { error = "Release APK not found on server." });
+});
+
 // 2. User/Collector Login & Access Control
 app.MapPost("/api/auth/login", async (LoginRequest req) =>
 {
