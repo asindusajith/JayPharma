@@ -58,7 +58,7 @@ jobs:
               - Realtime SQL Server Sync
             
             **Direct Download Link**:
-            [Download app-release.apk](https://github.com/${{ github.repository }}/releases/latest/download/app-release.apk)
+            [Download app-release.apk](https://github.com/${{ github.repository }}/releases/download/latest/app-release.apk)
           files: build/app/outputs/flutter-apk/app-release.apk
           make_latest: true
         env:

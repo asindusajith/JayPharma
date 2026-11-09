@@ -8,6 +8,10 @@ import '../../models/app_user.dart';
 import '../../models/customer.dart';
 import '../../theme/app_theme.dart';
 import '../../services/localization_service.dart';
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
+import '../../models/receipt.dart';
+import '../../services/receipt_printer_service.dart';
 import '../../services/bluetooth_printer_service.dart';
 import '../../services/app_lock_service.dart';
 import 'user_management_screen.dart';
@@ -312,6 +316,254 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _showBluetoothDiagnostics(BuildContext context, String lang) async {
+    final isSi = lang == 'si';
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final diag = await BluetoothPrinterService.getDiagnostics();
+    if (context.mounted) Navigator.pop(context);
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final bool isBtOn = diag["bluetoothEnabled"] == true;
+          final bool isPermGranted = diag["permissionGranted"] == true;
+          final bonded = diag['bondedDevices'] as List<dynamic>? ?? [];
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                const Icon(Icons.troubleshoot, color: AppTheme.primaryBlue, size: 22),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    isSi ? 'Bluetooth දෝෂ විනිශ්චය' : 'Bluetooth Diagnostics',
+                    style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 1. Bluetooth Power
+                  Row(
+                    children: [
+                      Icon(
+                        isBtOn ? Icons.check_circle : Icons.cancel,
+                        color: isBtOn ? const Color(0xFF16A34A) : AppTheme.dangerRed,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Bluetooth Power: ${isBtOn ? (isSi ? "ක්‍රියාත්මකයි (ON)" : "Enabled (ON)") : (isSi ? "ක්‍රියා විරහිතයි (OFF)" : "Disabled (OFF)")}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+
+                  // 2. Permission Status
+                  Row(
+                    children: [
+                      Icon(
+                        isPermGranted ? Icons.check_circle : Icons.warning_amber_rounded,
+                        color: isPermGranted ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                        size: 16,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Permissions: ${isPermGranted ? (isSi ? "ලබා දී ඇත (Granted)" : "Granted") : (isSi ? "ලබා දී නැත (Denied)" : "Denied")}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (diag.containsKey('btConnect'))
+                    Padding(
+                      padding: const EdgeInsets.only(left: 22, top: 2),
+                      child: Text('BLUETOOTH_CONNECT: ${diag["btConnect"]}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                    ),
+                  if (diag.containsKey('btScan'))
+                    Padding(
+                      padding: const EdgeInsets.only(left: 22, top: 2),
+                      child: Text('BLUETOOTH_SCAN: ${diag["btScan"]}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                    ),
+
+                  if (!isPermGranted) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.security, size: 16),
+                        label: Text(
+                          isSi ? 'Bluetooth Permissions ලබා දෙන්න (Allow)' : 'Grant Bluetooth Permissions',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2563EB),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          await BluetoothPrinterService.requestPermission();
+                          await BluetoothPrinterService.openAppPermissionSettings();
+                          if (context.mounted) _loadBluetoothPrinters();
+                        },
+                      ),
+                    ),
+                  ],
+
+                  const Divider(height: 20),
+
+                  // 3. Paired Devices in Android OS
+                  Text(
+                    isSi ? 'Android OS හි ඇති Paired Devices:' : 'Bonded Devices in Android OS:',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  const SizedBox(height: 6),
+                  if (bonded.isNotEmpty)
+                    ...bonded.map((d) {
+                      final name = d is Map ? (d['name'] ?? 'Device') : d.toString();
+                      final addr = d is Map ? (d['address'] ?? '') : '';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '$name\n$addr',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF16A34A),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              ),
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                final dev = BluetoothPrinterDevice(name: name.toString(), address: addr.toString());
+                                setState(() {
+                                  if (!_pairedPrinters.any((p) => p.address == addr)) _pairedPrinters.add(dev);
+                                  _selectedPrinterDevice = dev;
+                                });
+                                _connectToPrinter(dev, lang);
+                              },
+                              child: Text(isSi ? 'Connect' : 'Connect', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      );
+                    })
+                  else
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFECACA)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isSi
+                                ? 'Android OS හි Paired උපාංග කිසිවක් හමු නොවීය.\n\nකරුණාකර දුරකථනයේ Settings -> Bluetooth වෙත ගොස් Printer එක Pair (PIN: 0000 හෝ 1234) කරගන්න.'
+                                : 'No bonded Bluetooth devices found in Android OS.\n\nPlease pair the printer in phone Bluetooth Settings (PIN: 0000 or 1234) first.',
+                            style: const TextStyle(fontSize: 11, color: AppTheme.dangerRed, height: 1.4),
+                          ),
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.settings_bluetooth, size: 16),
+                            label: Text(isSi ? 'දුරකථනයේ Bluetooth Settings' : 'Open Phone BT Settings', style: const TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              BluetoothPrinterService.openBluetoothSettings();
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(isSi ? 'වසන්න' : 'Close'),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.radar, size: 16),
+                label: Text(isSi ? 'අවට පරිලෝකනය (Live Scan)' : 'Live Scan Nearby'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _loadBluetoothPrinters();
+                },
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _runSystemTestPrint(String lang) async {
+    try {
+      final dummyReceipt = Receipt(
+        manualReceiptNo: 'TEST-0001',
+        customerCode: 'CUST-001',
+        customerName: 'Test Pharmacy Customer',
+        customerAddress: 'Colombo, Sri Lanka',
+        customerPhone: '0770000000',
+        paymentMethod: PaymentMethod.cash,
+        totalAmount: 1500.0,
+        allocatedInvoices: [],
+        collectorId: 'TEST-USER',
+        collectorName: 'JayPharma Test Cashier',
+        latitude: 6.9271,
+        longitude: 79.8612,
+        locationAddress: 'Colombo, Sri Lanka',
+        createdAt: DateTime.now(),
+      );
+      final pdfBytes = await ReceiptPrinterService.generateReceiptPdf(dummyReceipt);
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdfBytes,
+        name: 'JayPharma_Test_Print',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Print Spooler Error: $e')));
+      }
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -527,6 +779,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.troubleshoot, size: 15, color: Color(0xFF1D4ED8)),
+                            label: Text(
+                              lang == 'si' ? 'Bluetooth දෝෂ විනිශ්චය (Diagnostics & Help)' : 'Bluetooth Diagnostics & Help',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8)),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              side: const BorderSide(color: Color(0xFFBFDBFE)),
+                              backgroundColor: const Color(0xFFEFF6FF),
+                            ),
+                            onPressed: () => _showBluetoothDiagnostics(context, lang),
+                          ),
+                        ),
 
                         if (_pairedPrinters.isEmpty && !_isScanningPrinters) ...[
                           const SizedBox(height: 6),
@@ -625,14 +895,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(height: 10),
                         ],
 
-                        // Paper Size & Direct Test Print
+                        // Paper Size & Direct Test Print + System Print Fallback
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Row(
                               children: [
                                 Text(
-                                  lang == 'si' ? 'පත්‍ර ප්‍රමාණය: ' : 'Paper: ',
+                                  lang == 'si' ? 'පත්‍ර: ' : 'Paper: ',
                                   style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
                                 ),
                                 DropdownButton<bool>(
@@ -640,7 +910,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   isDense: true,
                                   underline: const SizedBox(),
                                   items: const [
-                                    DropdownMenuItem(value: true, child: Text('80mm POS Thermal', style: TextStyle(fontSize: 11.5))),
+                                    DropdownMenuItem(value: true, child: Text('80mm POS', style: TextStyle(fontSize: 11.5))),
                                     DropdownMenuItem(value: false, child: Text('58mm Mini', style: TextStyle(fontSize: 11.5))),
                                   ],
                                   onChanged: (val) {
@@ -649,21 +919,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               ],
                             ),
-                            ElevatedButton.icon(
-                              onPressed: _isPrintingTest ? null : () => _runTestPrint(lang),
-                              icon: _isPrintingTest
-                                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                  : const Icon(Icons.print, size: 14),
-                              label: Text(
-                                LocalizationService.tr('test_print', lang: lang),
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.primaryNavy,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
+                            Wrap(
+                              spacing: 6,
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: () => _runSystemTestPrint(lang),
+                                  icon: const Icon(Icons.share, size: 13),
+                                  label: Text(
+                                    lang == 'si' ? 'Printer App' : 'App Print',
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                    side: const BorderSide(color: Color(0xFF0284C7)),
+                                    foregroundColor: const Color(0xFF0284C7),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
+                                ElevatedButton.icon(
+                                  onPressed: _isPrintingTest ? null : () => _runTestPrint(lang),
+                                  icon: _isPrintingTest
+                                      ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                      : const Icon(Icons.print, size: 14),
+                                  label: Text(
+                                    LocalizationService.tr('test_print', lang: lang),
+                                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.primaryNavy,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -736,22 +1025,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             onPressed: () async {
+                              final githubUrl = 'https://github.com/asindusajith/JayPharma/releases/download/latest/app-release.apk';
+                              final localWifiUrl = 'http://192.168.1.18:8090/JayPharma-release.apk';
                               final serverApkUrl = '${appState.apiBaseUrl}/app/download-apk';
-                              final githubUrl = 'https://github.com/asindusajith/JayPharma/releases/latest/download/app-release.apk';
                               try {
-                                final uri = Uri.parse(serverApkUrl);
+                                final uri = Uri.parse(githubUrl);
                                 final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
                                 if (!launched) {
-                                  await launchUrl(Uri.parse(githubUrl), mode: LaunchMode.externalApplication);
+                                  await launchUrl(Uri.parse(localWifiUrl), mode: LaunchMode.externalApplication);
                                 }
                               } catch (e) {
                                 try {
-                                  await launchUrl(Uri.parse(githubUrl), mode: LaunchMode.externalApplication);
-                                } catch (e2) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Could not open download link: $e2')),
-                                    );
+                                  await launchUrl(Uri.parse(localWifiUrl), mode: LaunchMode.externalApplication);
+                                } catch (_) {
+                                  try {
+                                    await launchUrl(Uri.parse(serverApkUrl), mode: LaunchMode.externalApplication);
+                                  } catch (e2) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Could not open download link: $e2')),
+                                      );
+                                    }
                                   }
                                 }
                               }

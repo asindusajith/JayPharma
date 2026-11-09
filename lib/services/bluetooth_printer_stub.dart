@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'bluetooth_printer_device.dart';
-import 'esc_pos_receipt_builder.dart';
 import 'receipt_printer_service.dart';
 import '../models/receipt.dart';
 
@@ -17,6 +16,9 @@ class BluetoothPrinterService {
   static Future<bool> requestPermission() async => true;
   static Future<bool> isBluetoothEnabled() async => true;
   static Future<void> openBluetoothSettings() async {}
+  static Future<void> openAppPermissionSettings() async {}
+  static Future<bool> pairDevice(String address) async => true;
+  static Future<Map<String, dynamic>> getDiagnostics() async => {'platform': 'web/desktop', 'status': 'ok'};
 
   static Future<bool> isConnected() async {
     return _connectedDevice != null && _connectedDevice!.isConnected;

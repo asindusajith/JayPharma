@@ -71,12 +71,11 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "getBondedDevices" -> {
+                    val list = mutableListOf<Map<String, String>>()
                     try {
                         val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
                         val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
-                        val list = mutableListOf<Map<String, String>>()
-                        val bonded = adapter?.bondedDevices
-                        bonded?.forEach { dev ->
+                        adapter?.bondedDevices?.forEach { dev ->
                             val devName = try {
                                 val n = dev.name
                                 if (!n.isNullOrBlank()) n else "Bluetooth Device"
@@ -88,26 +87,34 @@ class MainActivity : FlutterActivity() {
                                 "address" to dev.address
                             ))
                         }
-                        result.success(list)
                     } catch (e: Exception) {
-                        result.success(emptyList<Map<String, String>>())
+                        android.util.Log.w("JayPharmaBT", "getBondedDevices error: ${e.message}")
                     }
+                    result.success(list)
                 }
                 "scanNearbyDevices" -> {
+                    val list = mutableListOf<Map<String, String>>()
+                    val discovered = mutableListOf<Map<String, String>>()
                     try {
                         val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
                         val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
-                        val list = mutableListOf<Map<String, String>>()
 
                         // 1. Bonded devices first
-                        adapter?.bondedDevices?.forEach { dev ->
-                            val n = try { dev.name?.takeIf { it.isNotBlank() } ?: "Bluetooth Device" } catch (_: Exception) { "Bluetooth Device" }
-                            list.add(mapOf("name" to n, "address" to dev.address))
+                        try {
+                            adapter?.bondedDevices?.forEach { dev ->
+                                val n = try { dev.name?.takeIf { it.isNotBlank() } ?: "Bluetooth Device" } catch (_: Exception) { "Bluetooth Device" }
+                                val addr = dev.address
+                                if (!addr.isNullOrBlank() && list.none { it["address"] == addr }) {
+                                    list.add(mapOf("name" to n, "address" to addr))
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("JayPharmaBT", "Error reading bonded devices: ${e.message}")
                         }
 
-                        // 2. Discover nearby broadcasting Bluetooth devices
+                        // 2. Discover nearby broadcasting Bluetooth devices (Classic + BLE)
                         if (adapter != null && adapter.isEnabled) {
-                            val discovered = mutableListOf<Map<String, String>>()
+                            var receiverRegistered = false
                             val receiver = object : BroadcastReceiver() {
                                 override fun onReceive(c: Context?, intent: Intent?) {
                                     if (BluetoothDevice.ACTION_FOUND == intent?.action) {
@@ -127,14 +134,55 @@ class MainActivity : FlutterActivity() {
                                     }
                                 }
                             }
-                            registerReceiver(receiver, IntentFilter(BluetoothDevice.ACTION_FOUND))
-                            adapter.startDiscovery()
+
+                            val leCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                object : android.bluetooth.le.ScanCallback() {
+                                    override fun onScanResult(callbackType: Int, scanResult: android.bluetooth.le.ScanResult?) {
+                                        val dev = scanResult?.device ?: return
+                                        val name = try {
+                                            val rawName = dev.name ?: scanResult.scanRecord?.deviceName
+                                            if (!rawName.isNullOrBlank()) rawName else "BLE Printer"
+                                        } catch (_: Exception) { "BLE Printer" }
+                                        val addr = dev.address
+                                        if (!addr.isNullOrBlank() && list.none { it["address"] == addr } && discovered.none { it["address"] == addr }) {
+                                            discovered.add(mapOf("name" to name, "address" to addr))
+                                        }
+                                    }
+                                }
+                            } else null
+
+                            try {
+                                registerReceiver(receiver, IntentFilter(BluetoothDevice.ACTION_FOUND))
+                                receiverRegistered = true
+                                try { adapter.cancelDiscovery() } catch (_: Exception) {}
+                                adapter.startDiscovery()
+                            } catch (e: Exception) {
+                                android.util.Log.w("JayPharmaBT", "startDiscovery failed: ${e.message}")
+                            }
+
+                            try {
+                                if (leCallback != null) {
+                                    adapter.bluetoothLeScanner?.startScan(leCallback)
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.w("JayPharmaBT", "BLE scan failed: ${e.message}")
+                            }
 
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 try {
                                     adapter.cancelDiscovery()
-                                    unregisterReceiver(receiver)
                                 } catch (_: Exception) {}
+                                if (receiverRegistered) {
+                                    try {
+                                        unregisterReceiver(receiver)
+                                    } catch (_: Exception) {}
+                                }
+                                try {
+                                    if (leCallback != null) {
+                                        adapter.bluetoothLeScanner?.stopScan(leCallback)
+                                    }
+                                } catch (_: Exception) {}
+
                                 list.addAll(discovered)
                                 result.success(list)
                             }, 3500)
@@ -142,7 +190,34 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(list)
                     } catch (e: Exception) {
-                        result.success(emptyList<Map<String, String>>())
+                        result.success(list)
+                    }
+                }
+                "pairDevice" -> {
+                    val addr = call.argument<String>("address")
+                    if (addr.isNullOrBlank()) {
+                        result.success(false)
+                    } else {
+                        try {
+                            val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                            val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                            val dev = adapter?.getRemoteDevice(addr)
+                            val ok = dev?.createBond() ?: false
+                            result.success(ok)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                }
+                "openAppSettings" -> {
+                    try {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        intent.data = android.net.Uri.fromParts("package", packageName, null)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
                     }
                 }
                 "openBluetoothSettings" -> {
@@ -175,7 +250,8 @@ class MainActivity : FlutterActivity() {
                 this,
                 arrayOf(
                     Manifest.permission.BLUETOOTH_CONNECT,
-                    Manifest.permission.BLUETOOTH_SCAN
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.ACCESS_FINE_LOCATION
                 ),
                 BT_PERMISSION_REQ_CODE
             )

@@ -10,7 +10,6 @@ import '../models/receipt.dart';
 class BluetoothPrinterService {
   static const String _prefKeyMac = 'selected_printer_mac';
   static const String _prefKeyName = 'selected_printer_name';
-  static const String _prefKeyPaper = 'selected_printer_paper';
 
   static const MethodChannel _nativeBtChannel = MethodChannel('com.jaypharma.app/bluetooth');
 
@@ -33,21 +32,32 @@ class BluetoothPrinterService {
   /// Request Bluetooth permissions (triggers Android system runtime dialog)
   static Future<bool> requestPermission() async {
     try {
-      // 1. Trigger plugin's own permission request
-      final granted = await PrintBluetoothThermal.isPermissionBluetoothGranted;
-      if (granted) return true;
-
-      // 2. Trigger native Android ActivityCompat request
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         await _nativeBtChannel.invokeMethod('requestBluetoothPermissions');
-        await Future.delayed(const Duration(milliseconds: 600));
-        final bool? has = await _nativeBtChannel.invokeMethod<bool>('hasBluetoothPermissions');
-        return has ?? false;
       }
+      final granted = await PrintBluetoothThermal.isPermissionBluetoothGranted;
       return granted;
     } catch (_) {
       return false;
     }
+  }
+
+  /// Detailed Bluetooth diagnostics for troubleshooting
+  static Future<Map<String, dynamic>> getDiagnostics() async {
+    final Map<String, dynamic> diag = {};
+    try {
+      diag['bluetoothEnabled'] = await isBluetoothEnabled();
+      diag['permissionGranted'] = await isPermissionGranted();
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        final bool? nativeHas = await _nativeBtChannel.invokeMethod<bool>('hasBluetoothPermissions');
+        diag['nativePermissionsGranted'] = nativeHas;
+        final rawBonded = await _nativeBtChannel.invokeMethod('getBondedDevices');
+        diag['bondedDevices'] = rawBonded;
+      }
+    } catch (e) {
+      diag['error'] = e.toString();
+    }
+    return diag;
   }
 
   /// Check if Bluetooth is turned ON on the device
@@ -70,6 +80,28 @@ class BluetoothPrinterService {
         await _nativeBtChannel.invokeMethod('openBluetoothSettings');
       }
     } catch (_) {}
+  }
+
+  /// Open Android App Settings so user can manually enable Bluetooth / Nearby devices permissions
+  static Future<void> openAppPermissionSettings() async {
+    try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        await _nativeBtChannel.invokeMethod('openAppSettings');
+      }
+    } catch (_) {}
+  }
+
+  /// Triggers OS pairing dialog with a discovered device
+  static Future<bool> pairDevice(String address) async {
+    try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        final bool? res = await _nativeBtChannel.invokeMethod<bool>('pairDevice', {'address': address});
+        return res ?? false;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Check if currently connected to a printer
