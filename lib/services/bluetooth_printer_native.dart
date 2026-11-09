@@ -86,8 +86,8 @@ class BluetoothPrinterService {
   }
 
   /// Returns list of paired Bluetooth devices on the system
-  /// Combines plugin discovery with native Android BluetoothAdapter fallback
-  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = true}) async {
+  /// Combines plugin discovery with native Android BluetoothAdapter fallback & Live Discovery
+  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = true, bool scanNearby = true}) async {
     try {
       if (requestPerm) {
         await requestPermission();
@@ -119,10 +119,11 @@ class BluetoothPrinterService {
         if (kDebugMode) print('[Bluetooth] PrintBluetoothThermal.pairedBluetooths: $e');
       }
 
-      // 2. Query Native Android BluetoothAdapter.bondedDevices (Direct Fallback)
+      // 2. Query Native Android BluetoothAdapter (bonded + live discovery of nearby broadcasting printers)
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         try {
-          final List<dynamic>? nativeList = await _nativeBtChannel.invokeMethod<List<dynamic>>('getBondedDevices');
+          final methodName = scanNearby ? 'scanNearbyDevices' : 'getBondedDevices';
+          final List<dynamic>? nativeList = await _nativeBtChannel.invokeMethod<List<dynamic>>(methodName);
           if (nativeList != null) {
             for (final item in nativeList) {
               if (item is Map) {
@@ -133,6 +134,18 @@ class BluetoothPrinterService {
                   if (!deviceMap.containsKey(address) || deviceMap[address]!.name == 'Bluetooth Printer') {
                     deviceMap[address] = BluetoothPrinterDevice(
                       name: name.isNotEmpty ? name : 'Bluetooth Printer',
+                      address: address,
+                      isConnected: isCur,
+                    );
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          if (kDebugMode) print('[Bluetooth] Native bondedDevices error: $e');
+        }
+      }
                       address: address,
                       isConnected: isCur,
                     );

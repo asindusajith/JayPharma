@@ -22,7 +22,7 @@ class BluetoothPrinterService {
     return _connectedDevice != null && _connectedDevice!.isConnected;
   }
 
-  static Future<List<BluetoothPrinterDevice>> getPairedDevices() async {
+  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = true, bool scanNearby = true}) async {
     final List<BluetoothPrinterDevice> list = [];
     final prefs = await SharedPreferences.getInstance();
     final savedMac = prefs.getString(_prefKeyMac);

@@ -2,10 +2,13 @@ package lk.jaypharma.jaypharma
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
@@ -84,6 +87,58 @@ class MainActivity : FlutterActivity() {
                                 "name" to devName,
                                 "address" to dev.address
                             ))
+                        }
+                        result.success(list)
+                    } catch (e: Exception) {
+                        result.success(emptyList<Map<String, String>>())
+                    }
+                }
+                "scanNearbyDevices" -> {
+                    try {
+                        val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                        val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                        val list = mutableListOf<Map<String, String>>()
+
+                        // 1. Bonded devices first
+                        adapter?.bondedDevices?.forEach { dev ->
+                            val n = try { dev.name?.takeIf { it.isNotBlank() } ?: "Bluetooth Device" } catch (_: Exception) { "Bluetooth Device" }
+                            list.add(mapOf("name" to n, "address" to dev.address))
+                        }
+
+                        // 2. Discover nearby broadcasting Bluetooth devices
+                        if (adapter != null && adapter.isEnabled) {
+                            val discovered = mutableListOf<Map<String, String>>()
+                            val receiver = object : BroadcastReceiver() {
+                                override fun onReceive(c: Context?, intent: Intent?) {
+                                    if (BluetoothDevice.ACTION_FOUND == intent?.action) {
+                                        val dev = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                                        } else {
+                                            @Suppress("DEPRECATION")
+                                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                                        }
+                                        if (dev != null) {
+                                            val name = try { dev.name?.takeIf { it.isNotBlank() } ?: "Nearby Printer" } catch (_: Exception) { "Nearby Printer" }
+                                            val addr = dev.address
+                                            if (!addr.isNullOrBlank() && list.none { it["address"] == addr } && discovered.none { it["address"] == addr }) {
+                                                discovered.add(mapOf("name" to name, "address" to addr))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            registerReceiver(receiver, IntentFilter(BluetoothDevice.ACTION_FOUND))
+                            adapter.startDiscovery()
+
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                try {
+                                    adapter.cancelDiscovery()
+                                    unregisterReceiver(receiver)
+                                } catch (_: Exception) {}
+                                list.addAll(discovered)
+                                result.success(list)
+                            }, 3500)
+                            return@setMethodCallHandler
                         }
                         result.success(list)
                     } catch (e: Exception) {
