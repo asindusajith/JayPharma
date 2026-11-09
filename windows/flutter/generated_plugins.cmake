@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   geolocator_windows
+  print_bluetooth_thermal
   printing
   url_launcher_windows
 )

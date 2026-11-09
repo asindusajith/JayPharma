@@ -106,6 +106,14 @@ class _DayStartFreezeOverlayState extends State<DayStartFreezeOverlay> with Sing
         ? DateFormat('yyyy-MM-dd • hh:mm a').format(appState.dayEndFinalizedAt!)
         : DateFormat('yyyy-MM-dd').format(DateTime.now());
 
+    final isNewDay = appState.dayStartLockReason == 'NEW_DAY';
+    final badgeText = isNewDay
+        ? LocalizationService.tr('day_start_new_day_badge', lang: lang)
+        : LocalizationService.tr('day_start_frozen_badge', lang: lang);
+    final subText = isNewDay
+        ? LocalizationService.tr('day_start_new_day_sub', lang: lang)
+        : LocalizationService.tr('day_start_sub', lang: lang);
+
     return Positioned.fill(
       child: Material(
         color: Colors.transparent,
@@ -256,7 +264,7 @@ class _DayStartFreezeOverlayState extends State<DayStartFreezeOverlay> with Sing
                                         ),
                                         const SizedBox(width: 6),
                                         Text(
-                                          LocalizationService.tr('day_start_frozen_badge', lang: lang),
+                                          badgeText,
                                           style: GoogleFonts.inter(
                                             fontSize: 11,
                                             fontWeight: FontWeight.w700,
@@ -324,7 +332,7 @@ class _DayStartFreezeOverlayState extends State<DayStartFreezeOverlay> with Sing
 
                                 // Subtitle
                                 Text(
-                                  LocalizationService.tr('day_start_sub', lang: lang),
+                                  subText,
                                   textAlign: TextAlign.center,
                                   style: GoogleFonts.inter(
                                     fontSize: 12.5,

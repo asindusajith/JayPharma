@@ -49,8 +49,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final todaySummary = appState.calculateDayEndSummary(DateTime.now());
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        // Prevent back press from exiting app or dropping to launcher
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
         title: const JayPharmaLogo(size: 38, isDark: true, showText: true),
         actions: [
@@ -616,6 +621,7 @@ class _HomeScreenState extends State<HomeScreen> {
         const DayStartFreezeOverlay(),
     ],
   ),
+),
 );
 }
 

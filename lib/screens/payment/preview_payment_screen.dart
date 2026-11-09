@@ -216,6 +216,36 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                               ],
                             ),
                           ),
+                        if (selectedInvoices.isNotEmpty && appState.remainingPaymentAmount > 0.01) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFBFDBFE)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.account_balance_wallet_outlined, size: 16, color: Color(0xFF1D4ED8)),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      lang == 'si' ? 'ඉතිරි අත්තිකාරම් මුදල:' : 'Remaining Advance:',
+                                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF1E40AF)),
+                                    ),
+                                  ],
+                                ),
+                                Text(
+                                  'Rs. ${currency.format(appState.remainingPaymentAmount)}',
+                                  style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.bold, color: const Color(0xFF1D4ED8)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         ],
                         const SizedBox(height: 14),
                         const Divider(),
@@ -323,6 +353,36 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                               ],
                             ),
                           ),
+                        if (selectedInvoices.isNotEmpty && appState.remainingPaymentAmount > 0.01) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFBFDBFE)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.account_balance_wallet_outlined, size: 16, color: Color(0xFF1D4ED8)),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      lang == 'si' ? 'ඉතිරි අත්තිකාරම් මුදල:' : 'Remaining Advance:',
+                                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF1E40AF)),
+                                    ),
+                                  ],
+                                ),
+                                Text(
+                                  'Rs. ${currency.format(appState.remainingPaymentAmount)}',
+                                  style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.bold, color: const Color(0xFF1D4ED8)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

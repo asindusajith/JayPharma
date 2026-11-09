@@ -84,6 +84,7 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
   final _receiptNoController = TextEditingController();
   final _chequeNoController = TextEditingController();
   final _commentsController = TextEditingController();
+  bool _attemptedSubmit = false;
 
   @override
   void initState() {
@@ -134,7 +135,8 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
     final isUniqueReceiptNo = appState.isReceiptNumberUnique(appState.draftManualReceiptNo);
 
     final outstandingInvoices = appState.draftInvoices.where((i) => i.outstandingBalance > 0 && i.status != 'Settled').toList();
-    final paidInvoices = appState.draftInvoices.where((i) => i.outstandingBalance <= 0 || i.status == 'Settled').toList();
+    final isChequeComplete = appState.draftPaymentMethod != PaymentMethod.cheque ||
+        _chequeNoController.text.replaceAll(RegExp(r'\D'), '').length == 13;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -261,6 +263,9 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                                       isSelected: appState.draftPaymentMethod == PaymentMethod.cash,
                                       onTap: () {
                                         appState.setDraftPaymentMethod(PaymentMethod.cash);
+                                        setState(() {
+                                          _attemptedSubmit = false;
+                                        });
                                       },
                                     ),
                                   ),
@@ -272,6 +277,9 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                                       isSelected: appState.draftPaymentMethod == PaymentMethod.cheque,
                                       onTap: () {
                                         appState.setDraftPaymentMethod(PaymentMethod.cheque);
+                                        setState(() {
+                                          _attemptedSubmit = false;
+                                        });
                                       },
                                     ),
                                   ),
@@ -319,10 +327,17 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                                           color: AppTheme.textDark,
                                         ),
                                         decoration: InputDecoration(
-                                          labelText: lang == 'si' ? 'චෙක්පත් අංකය' : 'Cheque Number',
+                                          labelText: lang == 'si' ? 'චෙක්පත් අංකය (අනිවාර්යයි)' : 'Cheque Number (Mandatory)',
                                           hintText: '123456-1234-123',
                                           hintStyle: GoogleFonts.outfit(fontSize: 13, color: Colors.grey.shade400, letterSpacing: 0.6),
                                           prefixIcon: const Icon(Icons.confirmation_number_outlined, size: 20),
+                                          errorText: _attemptedSubmit && _chequeNoController.text.replaceAll(RegExp(r'\D'), '').length != 13
+                                              ? (_chequeNoController.text.trim().isEmpty
+                                                  ? (lang == 'si' ? 'චෙක්පත් අංකය අනිවාර්යයි' : 'Cheque number is required')
+                                                  : (lang == 'si'
+                                                      ? 'ඉලක්කම් 13ක් සම්පූර්ණ කරන්න (${_chequeNoController.text.replaceAll(RegExp(r'\D'), '').length}/13)'
+                                                      : 'Must be 13 digits (${_chequeNoController.text.replaceAll(RegExp(r'\D'), '').length}/13)'))
+                                              : null,
                                         ),
                                       ),
                                     ),
@@ -335,11 +350,23 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                                         children: [
                                           InkWell(
                                             borderRadius: BorderRadius.circular(12),
-                                            onTap: () => _pickChequeDate(appState, dateFormat),
+                                            onTap: () {
+                                              if (!isChequeComplete) {
+                                                _showChequeNumberRequiredDialog(action: 'selecting the cheque date');
+                                                return;
+                                              }
+                                              _pickChequeDate(appState, dateFormat);
+                                            },
                                             child: InputDecorator(
                                               decoration: InputDecoration(
                                                 labelText: LocalizationService.tr('cheque_date', lang: lang),
                                                 prefixIcon: const Icon(Icons.calendar_today_rounded, size: 18),
+                                                suffixIcon: !isChequeComplete ? const Icon(Icons.lock_outline, size: 16, color: Color(0xFF94A3B8)) : null,
+                                                fillColor: !isChequeComplete ? const Color(0xFFF8FAFC) : null,
+                                                filled: !isChequeComplete,
+                                                errorText: _attemptedSubmit && appState.draftChequeDate == null
+                                                    ? (lang == 'si' ? 'දිනය තෝරන්න' : 'Date required')
+                                                    : null,
                                               ),
                                               child: Text(
                                                 appState.draftChequeDate != null
@@ -348,7 +375,9 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                                                 style: GoogleFonts.inter(
                                                   fontSize: 13,
                                                   fontWeight: FontWeight.w600,
-                                                  color: appState.draftChequeDate != null ? AppTheme.textDark : AppTheme.textLight,
+                                                  color: !isChequeComplete
+                                                      ? const Color(0xFF94A3B8)
+                                                      : (appState.draftChequeDate != null ? AppTheme.textDark : AppTheme.textLight),
                                                 ),
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
@@ -417,33 +446,92 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               // Payment Amount Field
-                              Text(
-                                LocalizationService.tr('payment_amount', lang: lang),
-                                style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                              Row(
+                                children: [
+                                  Text(
+                                    LocalizationService.tr('payment_amount', lang: lang),
+                                    style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                                  ),
+                                  if (!isChequeComplete) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFEF2F2),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: const Color(0xFFFECACA)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: const [
+                                          Icon(Icons.lock_outline, size: 12, color: Color(0xFFDC2626)),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Locked',
+                                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFB91C1C)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                               const SizedBox(height: 8),
-                              TextField(
-                                controller: _amountController,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                onChanged: (val) {
-                                  final amount = double.tryParse(val.replaceAll(',', '')) ?? 0.0;
-                                  appState.setDraftPaymentAmount(amount);
-                                },
-                                style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.primaryNavy),
-                                decoration: InputDecoration(
-                                  prefixText: 'Rs. ',
-                                  prefixStyle: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryNavy),
-                                  hintText: '0.00',
-                                  suffixIcon: _amountController.text.isNotEmpty
-                                      ? IconButton(
-                                          icon: const Icon(Icons.clear, size: 18),
-                                          onPressed: () {
-                                            _amountController.clear();
-                                            appState.setDraftPaymentAmount(0.0);
+                              Stack(
+                                children: [
+                                  TextField(
+                                    controller: _amountController,
+                                    readOnly: !isChequeComplete,
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    onChanged: (val) {
+                                      final amount = double.tryParse(val.replaceAll(',', '')) ?? 0.0;
+                                      appState.setDraftPaymentAmount(amount);
+                                    },
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                      color: !isChequeComplete ? const Color(0xFF94A3B8) : AppTheme.primaryNavy,
+                                    ),
+                                    decoration: InputDecoration(
+                                      prefixText: 'Rs. ',
+                                      prefixStyle: GoogleFonts.outfit(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: !isChequeComplete ? const Color(0xFF94A3B8) : AppTheme.primaryNavy,
+                                      ),
+                                      hintText: '0.00',
+                                      fillColor: !isChequeComplete ? const Color(0xFFF8FAFC) : null,
+                                      filled: !isChequeComplete,
+                                      helperText: !isChequeComplete
+                                          ? 'Please enter the complete 13-digit cheque number to enter amount'
+                                          : null,
+                                      helperStyle: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w600, fontSize: 11),
+                                      suffixIcon: _amountController.text.isNotEmpty && isChequeComplete
+                                          ? IconButton(
+                                              icon: const Icon(Icons.clear, size: 18),
+                                              onPressed: () {
+                                                _amountController.clear();
+                                                appState.setDraftPaymentAmount(0.0);
+                                              },
+                                            )
+                                          : (!isChequeComplete
+                                              ? const Icon(Icons.lock_outline, size: 18, color: Color(0xFF94A3B8))
+                                              : null),
+                                    ),
+                                  ),
+                                  if (!isChequeComplete)
+                                    Positioned.fill(
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          borderRadius: BorderRadius.circular(12),
+                                          onTap: () {
+                                            _showChequeNumberRequiredDialog(action: 'entering the payment amount');
                                           },
-                                        )
-                                      : null,
-                                ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                               const SizedBox(height: 10),
 
@@ -664,57 +752,7 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                           },
                         ),
 
-                      // Settled / Paid Invoices Section (Shown at the bottom of the list)
-                      if (!appState.isLoadingInvoices && paidInvoices.isNotEmpty) ...[
-                        const SizedBox(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              lang == 'si' ? 'ගෙවා නිමකළ ඉන්වොයිසි' : 'Settled Invoices (Paid History)',
-                              style: GoogleFonts.inter(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.textDark,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFECFDF5),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: const Color(0xFFA7F3D0)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.check_circle, size: 12, color: Color(0xFF047857)),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '${paidInvoices.length} ${lang == 'si' ? 'සමථය' : 'Settled'}',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: const Color(0xFF047857),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: paidInvoices.length,
-                          separatorBuilder: (context, index) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final inv = paidInvoices[index];
-                            return _buildPaidInvoiceRow(context, inv, currency, dateFormat, lang);
-                          },
-                        ),
-                      ],
+
                       const SizedBox(height: 16),
 
                       // Optional Comment Text Box (Page 4)
@@ -793,10 +831,59 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                   const SizedBox(width: 16),
                   ElevatedButton(
                     onPressed: () {
+                      setState(() {
+                        _attemptedSubmit = true;
+                      });
+
+                      if (appState.draftPaymentMethod == PaymentMethod.cheque) {
+                        final val = _chequeNoController.text.trim();
+                        final digits = val.replaceAll(RegExp(r'\D'), '');
+                        final bankCode = digits.length > 6 ? digits.substring(6, digits.length.clamp(6, 10)) : '';
+                        final branchCode = digits.length > 10 ? digits.substring(10, digits.length.clamp(10, 13)) : '';
+
+                        appState.setDraftChequeDetails(
+                          bank: bankCode.isNotEmpty ? bankCode : null,
+                          branch: branchCode.isNotEmpty ? branchCode : null,
+                          chequeNumber: val,
+                          chequeDate: appState.draftChequeDate,
+                        );
+
+                        if (digits.length != 13) {
+                          _showChequeNumberRequiredDialog(action: 'proceeding to review');
+                          return;
+                        }
+
+                        if (appState.draftChequeDate == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
+                                children: const [
+                                  Icon(Icons.error_outline, color: Colors.white, size: 20),
+                                  SizedBox(width: 8),
+                                  Expanded(child: Text('Please select the Cheque Date before proceeding')),
+                                ],
+                              ),
+                              backgroundColor: AppTheme.dangerRed,
+                            ),
+                          );
+                          return;
+                        }
+                      }
+
                       final error = appState.validateDraftPayment();
                       if (error != null) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(error), backgroundColor: AppTheme.dangerRed),
+                          SnackBar(
+                            content: Row(
+                              children: [
+                                const Icon(Icons.error_outline, color: Colors.white, size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(error)),
+                              ],
+                            ),
+                            backgroundColor: AppTheme.dangerRed,
+                            duration: const Duration(seconds: 4),
+                          ),
                         );
                         return;
                       }
@@ -852,6 +939,12 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () {
+          final digits = _chequeNoController.text.replaceAll(RegExp(r'\D'), '');
+          if (appState.draftPaymentMethod == PaymentMethod.cheque && digits.length != 13) {
+            _showChequeNumberRequiredDialog(action: 'allocating invoices');
+            return;
+          }
+
           if (appState.draftPaymentAmount <= 0) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -1033,32 +1126,68 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
 
                     // Allocated Pay Amount (if selected)
                     if (inv.isSelected) ...[
-                      const SizedBox(height: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFDCFCE7),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              '${LocalizationService.tr('pay_amount', lang: lang)}:',
-                              style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: const Color(0xFF166534)),
-                            ),
-                            Text(
-                              'Rs. ${currency.format(inv.allocatedAmount)}',
-                              style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFF166534)),
-                            ),
-                          ],
+                      const SizedBox(height: 8),
+                      InkWell(
+                        onTap: () => _showEditInvoiceAllocationDialog(inv, appState, currency, lang),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDCFCE7),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF86EFAC)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    '${LocalizationService.tr('pay_amount', lang: lang)}:',
+                                    style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.bold, color: const Color(0xFF166534)),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: const Color(0xFF86EFAC)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.edit_outlined, size: 11, color: Color(0xFF166534)),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          lang == 'si' ? 'වෙනස් කරන්න' : 'Edit',
+                                          style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: const Color(0xFF166534)),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Rs. ${currency.format(inv.allocatedAmount)}',
+                                    style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.bold, color: const Color(0xFF166534)),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.chevron_right, size: 16, color: Color(0xFF166534)),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       if (inv.allocatedAmount < inv.outstandingBalance) ...[
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 3),
                         Text(
                           '${LocalizationService.tr('partial_payment_tag', lang: lang)} (${LocalizationService.tr('remaining_prefix', lang: lang)}Rs. ${currency.format(inv.remainingBalanceAfterAllocation)})',
-                          style: GoogleFonts.inter(fontSize: 10, color: const Color(0xFFD97706), fontWeight: FontWeight.w500),
+                          style: GoogleFonts.inter(fontSize: 10, color: const Color(0xFFD97706), fontWeight: FontWeight.w600),
                         ),
                       ],
                     ],
@@ -1153,154 +1282,7 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
     );
   }
 
-  Widget _buildPaidInvoiceRow(
-    BuildContext context,
-    dynamic inv,
-    NumberFormat currency,
-    DateFormat dateFormat,
-    String lang,
-  ) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: const BoxDecoration(
-                color: Color(0xFFECFDF5),
-                shape: BoxShape.circle,
-              ),
-              child: const Center(
-                child: Icon(Icons.check, size: 15, color: Color(0xFF047857)),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Line 1: Invoice No + Settled Tag + Delivery Age
-                Row(
-                  children: [
-                    Text(
-                      '#${inv.invoiceNo}',
-                      style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.textDark,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFECFDF5),
-                        borderRadius: BorderRadius.circular(5),
-                        border: Border.all(color: const Color(0xFFA7F3D0)),
-                      ),
-                      child: Text(
-                        LocalizationService.tr('settled', lang: lang),
-                        style: GoogleFonts.inter(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF047857),
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      child: Text(
-                        '${LocalizationService.tr('age_prefix', lang: lang)}${inv.deliveryAgeDays} ${LocalizationService.tr('days', lang: lang)}',
-                        style: GoogleFonts.inter(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textMuted,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
 
-                // Line 2: 2-Column Info (Left: Date & Paid | Right: Due Rs. 0.00)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.calendar_today_outlined, size: 12, color: Color(0xFF94A3B8)),
-                              const SizedBox(width: 5),
-                              Text(
-                                '${LocalizationService.tr('date_prefix', lang: lang)}${dateFormat.format(inv.invoiceDate)}',
-                                style: GoogleFonts.inter(fontSize: 11.5, color: const Color(0xFF64748B), fontWeight: FontWeight.w500),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Icon(Icons.check_circle_outline, size: 12, color: Color(0xFF047857)),
-                              const SizedBox(width: 5),
-                              Text(
-                                '${LocalizationService.tr('paid_prefix', lang: lang)}Rs. ${currency.format(inv.setAmt > 0 ? inv.setAmt : inv.totalAmount)}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF047857),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          LocalizationService.tr('due_amount', lang: lang),
-                          style: GoogleFonts.inter(fontSize: 10.5, color: const Color(0xFF94A3B8), fontWeight: FontWeight.w500),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Rs. 0.00',
-                          style: GoogleFonts.outfit(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: const Color(0xFF94A3B8),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   /// Display breakdown table directly matching Image 2
   Widget _buildChequeBreakdown(String rawText, String lang) {
@@ -1365,12 +1347,27 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
                   ),
                 )
               else
-                Text(
-                  '${digits.length}/13 Digits',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF64748B),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFFECACA)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, size: 12, color: Color(0xFFDC2626)),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${digits.length}/13 ${lang == 'si' ? 'අසම්පූර්ණයි' : 'Incomplete'}',
+                        style: GoogleFonts.inter(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFFB91C1C),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
             ],
@@ -1393,37 +1390,53 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
             ),
           ),
           const SizedBox(height: 10),
-          // Cheque No (On System) in red text as depicted in user's image
+          // Cheque No (On System)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFFFEF2F2),
+              color: isComplete ? const Color(0xFFF0FDF4) : const Color(0xFFFEF2F2),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFFECACA)),
+              border: Border.all(color: isComplete ? const Color(0xFFBBF7D0) : const Color(0xFFFECACA)),
             ),
-            child: RichText(
-              text: TextSpan(
-                style: GoogleFonts.inter(fontSize: 12.5),
-                children: [
-                  TextSpan(
-                    text: 'Cheque No (On System) - ',
-                    style: GoogleFonts.inter(
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF991B1B),
+            child: Row(
+              children: [
+                Icon(
+                  isComplete ? Icons.check_circle_outline : Icons.error_outline,
+                  size: 16,
+                  color: isComplete ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: RichText(
+                    text: TextSpan(
+                      style: GoogleFonts.inter(fontSize: 12.5),
+                      children: [
+                        TextSpan(
+                          text: isComplete
+                              ? 'Cheque No (On System) - '
+                              : (lang == 'si'
+                                  ? 'චෙක්පත් අංකය අසම්පූර්ණයි (${digits.length}/13) - '
+                                  : 'Incomplete Cheque No (${digits.length}/13) - '),
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.bold,
+                            color: isComplete ? const Color(0xFF166534) : const Color(0xFF991B1B),
+                          ),
+                        ),
+                        TextSpan(
+                          text: systemChequeNo,
+                          style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
+                            color: isComplete ? const Color(0xFF15803D) : const Color(0xFFB91C1C),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  TextSpan(
-                    text: systemChequeNo,
-                    style: GoogleFonts.outfit(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                      color: const Color(0xFFB91C1C),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1459,7 +1472,278 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
     );
   }
 
+  void _showEditInvoiceAllocationDialog(
+    dynamic inv,
+    AppState appState,
+    NumberFormat currency,
+    String lang,
+  ) {
+    final otherAllocated = appState.draftInvoices
+        .where((i) => i.isSelected && i.invoiceNo != inv.invoiceNo)
+        .fold(0.0, (sum, i) => sum + i.allocatedAmount);
+    final maxAvailable = (appState.draftPaymentAmount - otherAllocated).clamp(0.0, (inv.outstandingBalance as num).toDouble());
+
+    final editController = TextEditingController(
+      text: (inv.allocatedAmount as num).toDouble().toStringAsFixed(inv.allocatedAmount % 1 == 0 ? 0 : 2),
+    );
+    editController.selection = TextSelection(baseOffset: 0, extentOffset: editController.text.length);
+
+    String? dialogError;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.tune, color: AppTheme.primaryBlue, size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      lang == 'si' ? 'ගෙවන මුදල වෙනස් කරන්න' : 'Edit Allocated Amount',
+                      style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    Text(
+                      '#${inv.invoiceNo}',
+                      style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Info Summary Card
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            lang == 'si' ? 'ඉන්වොයිසියේ හිඟ මුදල:' : 'Invoice Due Amount:',
+                            style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+                          ),
+                          Text(
+                            'Rs. ${currency.format(inv.outstandingBalance)}',
+                            style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFFDC2626)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            lang == 'si' ? 'වෙන් කළ හැකි උපරිමය:' : 'Max Available to Pay:',
+                            style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+                          ),
+                          Text(
+                            'Rs. ${currency.format(maxAvailable)}',
+                            style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFF166534)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Amount Text Field
+                Text(
+                  lang == 'si' ? 'මෙම ඉන්වොයිසිය සඳහා ගෙවන මුදල (රු.)' : 'Amount to pay for this invoice (Rs.)',
+                  style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: editController,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryNavy),
+                  decoration: InputDecoration(
+                    prefixText: 'Rs. ',
+                    prefixStyle: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryNavy),
+                    errorText: dialogError,
+                  ),
+                  onChanged: (val) {
+                    if (dialogError != null) {
+                      setDialogState(() {
+                        dialogError = null;
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                // Quick buttons
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ActionChip(
+                      label: Text(lang == 'si' ? 'සම්පූර්ණ මුදල' : 'Full (Rs. ${currency.format(maxAvailable)})'),
+                      labelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue),
+                      backgroundColor: const Color(0xFFEFF6FF),
+                      onPressed: () {
+                        editController.text = maxAvailable.toStringAsFixed(maxAvailable % 1 == 0 ? 0 : 2);
+                        setDialogState(() {
+                          dialogError = null;
+                        });
+                      },
+                    ),
+                    ActionChip(
+                      label: Text(lang == 'si' ? 'ඉවත් කරන්න (රු. 0)' : 'Clear (Rs. 0)'),
+                      labelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: const Color(0xFF64748B)),
+                      backgroundColor: const Color(0xFFF1F5F9),
+                      onPressed: () {
+                        editController.text = '0';
+                        setDialogState(() {
+                          dialogError = null;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(
+                lang == 'si' ? 'අවලංගු කරන්න' : 'Cancel',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: const Color(0xFF64748B)),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final text = editController.text.replaceAll(',', '').trim();
+                final val = double.tryParse(text);
+                if (val == null || val < 0) {
+                  setDialogState(() {
+                    dialogError = lang == 'si' ? 'වලංගු මුදලක් ඇතුළත් කරන්න' : 'Please enter a valid amount';
+                  });
+                  return;
+                }
+
+                final err = appState.setInvoiceAllocatedAmount(inv, val);
+                if (err != null) {
+                  setDialogState(() {
+                    dialogError = err;
+                  });
+                  return;
+                }
+
+                Navigator.pop(ctx);
+                setState(() {});
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: Text(
+                lang == 'si' ? 'යාවත්කාලීන කරන්න' : 'Update Amount',
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showChequeNumberRequiredDialog({String? action}) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 26),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Full Cheque Number Required',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              action != null
+                  ? 'Please enter the complete 13-digit cheque number before $action.'
+                  : 'Please enter the complete 13-digit cheque number before proceeding.',
+              style: const TextStyle(fontSize: 14, height: 1.4, color: Color(0xFF1E293B)),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: const [
+                  Icon(Icons.info_outline, size: 16, color: Color(0xFF64748B)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Format: Cheque No (6) - Bank (4) - Branch (3)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('OK', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _pickChequeDate(AppState appState, DateFormat dateFormat) async {
+    final digits = _chequeNoController.text.replaceAll(RegExp(r'\D'), '');
+    if (appState.draftPaymentMethod == PaymentMethod.cheque && digits.length != 13) {
+      _showChequeNumberRequiredDialog(action: 'selecting the cheque date');
+      return;
+    }
     final picked = await showDatePicker(
       context: context,
       initialDate: appState.draftChequeDate ?? DateTime.now(),

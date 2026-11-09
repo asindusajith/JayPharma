@@ -1114,6 +1114,56 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
                         await dpayCmd.ExecuteNonQueryAsync();
                     }
                 }
+
+                // If invoice allocations did not exhaust TotalAmount, write remaining balance as Advance
+                decimal totalSettled = dto.AllocatedInvoices.Sum(x => Convert.ToDecimal(x.AmountSettled));
+                decimal unallocatedAdvance = Convert.ToDecimal(dto.TotalAmount) - totalSettled;
+                if (unallocatedAdvance > 0.01m)
+                {
+                    using var advCmd = erpConn.CreateCommand();
+                    advCmd.CommandText = @"
+                        INSERT INTO dbo.AppInvoice 
+                        (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
+                         PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
+                        VALUES 
+                        (0, @date, @cCode, @cName, 0, @setAmt, 'Jay Pharma', 'Advance', 0, 0, @totAmt, @mrNo, @details,
+                         @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
+
+                    advCmd.Parameters.AddWithValue("@date", DateTime.Now.Date);
+                    advCmd.Parameters.AddWithValue("@cCode", numericCustCode);
+                    advCmd.Parameters.AddWithValue("@cName", dto.CustomerName?.Trim() ?? "");
+                    advCmd.Parameters.AddWithValue("@setAmt", unallocatedAdvance);
+                    advCmd.Parameters.AddWithValue("@totAmt", dto.TotalAmount);
+                    advCmd.Parameters.AddWithValue("@mrNo", dto.ManualReceiptNo?.Trim() ?? "");
+                    advCmd.Parameters.AddWithValue("@details", $"Advance Balance | Collector: {dto.CollectorName ?? ""}");
+
+                    advCmd.Parameters.AddWithValue("@payType", string.IsNullOrWhiteSpace(dto.PaymentMethod) ? "CASH" : dto.PaymentMethod.Trim());
+                    advCmd.Parameters.AddWithValue("@bank", dto.Bank?.Trim() ?? "");
+                    advCmd.Parameters.AddWithValue("@chqBranch", resolvedBranch);
+                    advCmd.Parameters.AddWithValue("@chqNo", dto.ChequeNumber?.Trim() ?? "");
+                    advCmd.Parameters.AddWithValue("@chqDate", dto.ChequeDate.HasValue ? (object)dto.ChequeDate.Value.Date : DBNull.Value);
+                    advCmd.Parameters.AddWithValue("@det1", dto.Comments?.Trim() ?? "");
+                    advCmd.Parameters.AddWithValue("@det2", resolvedLocation);
+                    advCmd.Parameters.AddWithValue("@det3", "");
+                    await advCmd.ExecuteNonQueryAsync();
+
+                    using var dpayAdvCmd = erpConn.CreateCommand();
+                    dpayAdvCmd.CommandText = @"
+                        DECLARE @newRNo INT = (SELECT ISNULL(MAX(RNo), 0) + 1 FROM DPay);
+                        INSERT INTO DPay (RNo, Date, InvNo, CCode, Name, Branch, Details, Amount, ShEx, Type, CheNo, PDDate, [Check], Audit, MRNo)
+                        VALUES (@newRNo, @date, 0, @cCode, @cName, 'Jay Pharma', @details, @amount, 0, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
+
+                    dpayAdvCmd.Parameters.AddWithValue("@date", DateTime.Now.Date);
+                    dpayAdvCmd.Parameters.AddWithValue("@cCode", numericCustCode);
+                    dpayAdvCmd.Parameters.AddWithValue("@cName", dto.CustomerName?.Trim() ?? "");
+                    dpayAdvCmd.Parameters.AddWithValue("@details", $"Field Advance Balance by {dto.CollectorName}");
+                    dpayAdvCmd.Parameters.AddWithValue("@amount", unallocatedAdvance);
+                    dpayAdvCmd.Parameters.AddWithValue("@type", dto.PaymentMethod.Equals("CHEQUE", StringComparison.OrdinalIgnoreCase) ? "Cheque" : "Cash");
+                    dpayAdvCmd.Parameters.AddWithValue("@cheNo", (object?)dto.ChequeNumber ?? "");
+                    dpayAdvCmd.Parameters.AddWithValue("@pdDate", dto.ChequeDate.HasValue ? dto.ChequeDate.Value.ToString("dd/MM/yyyy") : "");
+                    dpayAdvCmd.Parameters.AddWithValue("@mrNo", numericReceiptNo);
+                    await dpayAdvCmd.ExecuteNonQueryAsync();
+                }
             }
             else if (dto.TotalAmount > 0)
             {
@@ -1334,6 +1384,56 @@ app.MapPost("/api/receipts/resync-to-erp", async () =>
                         await dpayCmd.ExecuteNonQueryAsync();
                     }
                 }
+
+                // Resync: If invoice allocations did not exhaust TotalAmount, write remaining balance as Advance
+                decimal totalSettled = invs.Sum(x => Convert.ToDecimal(x.AmountSettled));
+                decimal unallocatedAdvance = Convert.ToDecimal(r.TotalAmount) - totalSettled;
+                if (unallocatedAdvance > 0.01m)
+                {
+                    using var advCmd = erpConn.CreateCommand();
+                    advCmd.CommandText = @"
+                        INSERT INTO dbo.AppInvoice 
+                        (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
+                         PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
+                        VALUES 
+                        (0, @date, @cCode, @cName, 0, @setAmt, 'Jay Pharma', 'Advance', 0, 0, @totAmt, @mrNo, @details,
+                         @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
+
+                    advCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
+                    advCmd.Parameters.AddWithValue("@cCode", numericCustCode);
+                    advCmd.Parameters.AddWithValue("@cName", r.CustomerName);
+                    advCmd.Parameters.AddWithValue("@setAmt", unallocatedAdvance);
+                    advCmd.Parameters.AddWithValue("@totAmt", r.TotalAmount);
+                    advCmd.Parameters.AddWithValue("@mrNo", mrNo);
+                    advCmd.Parameters.AddWithValue("@details", $"Resync Advance Balance | Collector: {r.CollectorName}");
+
+                    advCmd.Parameters.AddWithValue("@payType", string.IsNullOrWhiteSpace(r.PaymentMethod) ? "CASH" : r.PaymentMethod.Trim());
+                    advCmd.Parameters.AddWithValue("@bank", r.Bank ?? "");
+                    advCmd.Parameters.AddWithValue("@chqBranch", resolvedBranch);
+                    advCmd.Parameters.AddWithValue("@chqNo", r.ChequeNumber ?? "");
+                    advCmd.Parameters.AddWithValue("@chqDate", r.ChequeDate != null ? (object)((DateTime)r.ChequeDate).Date : DBNull.Value);
+                    advCmd.Parameters.AddWithValue("@det1", r.Comments ?? "");
+                    advCmd.Parameters.AddWithValue("@det2", resolvedLocation);
+                    advCmd.Parameters.AddWithValue("@det3", "");
+                    await advCmd.ExecuteNonQueryAsync();
+
+                    using var dpayAdvCmd = erpConn.CreateCommand();
+                    dpayAdvCmd.CommandText = @"
+                        DECLARE @newRNo INT = (SELECT ISNULL(MAX(RNo), 0) + 1 FROM DPay);
+                        INSERT INTO DPay (RNo, Date, InvNo, CCode, Name, Branch, Details, Amount, ShEx, Type, CheNo, PDDate, [Check], Audit, MRNo)
+                        VALUES (@newRNo, @date, 0, @cCode, @cName, 'Jay Pharma', @details, @amount, 0, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
+
+                    dpayAdvCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
+                    dpayAdvCmd.Parameters.AddWithValue("@cCode", numericCustCode);
+                    dpayAdvCmd.Parameters.AddWithValue("@cName", r.CustomerName);
+                    dpayAdvCmd.Parameters.AddWithValue("@details", $"Resync Advance Balance by {r.CollectorName}");
+                    dpayAdvCmd.Parameters.AddWithValue("@amount", unallocatedAdvance);
+                    dpayAdvCmd.Parameters.AddWithValue("@type", r.PaymentMethod.Equals("CHEQUE", StringComparison.OrdinalIgnoreCase) ? "Cheque" : "Cash");
+                    dpayAdvCmd.Parameters.AddWithValue("@cheNo", (object?)r.ChequeNumber ?? "");
+                    dpayAdvCmd.Parameters.AddWithValue("@pdDate", r.ChequeDate != null ? ((DateTime)r.ChequeDate).ToString("dd/MM/yyyy") : "");
+                    dpayAdvCmd.Parameters.AddWithValue("@mrNo", numericReceiptNo);
+                    await dpayAdvCmd.ExecuteNonQueryAsync();
+                }
             }
             else if (r.TotalAmount > 0)
             {
@@ -1458,69 +1558,171 @@ app.MapPost("/api/dayend/finalize", async (DayEndFinalizeRequest req) =>
     return Results.Ok(new { success = true, collectorId = actualCollectorId, message = "Day-End statement finalized and locked for today." });
 });
 
-// 7b. Check Collector Day-End Status (Checks if previously finalized and waiting for Day Start)
+// 7b. Check Collector Day-End / Day-Start Status (New Day or Finalized requires OTP unlock)
 app.MapGet("/api/dayend/status/{collectorId}", async (string collectorId) =>
 {
     try
     {
         using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-            SELECT TOP 1 IsFinalized, FinalizedAt, SummaryDate 
-            FROM DayEndSummaries 
-            WHERE CollectorId IN (
-                SELECT CollectorId FROM Collectors 
+
+        string resolvedCollectorId = collectorId.Trim();
+        string accessLevel = "Collector";
+        DateTime? lastDayStartDate = null;
+
+        // 1. Resolve Collector info & LastDayStartDate
+        using (var colCmd = conn.CreateCommand())
+        {
+            colCmd.CommandText = @"
+                SELECT TOP 1 CollectorId, AccessLevel, LastDayStartDate 
+                FROM Collectors 
                 WHERE LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId))) 
                    OR LOWER(LTRIM(RTRIM(Username))) = LOWER(LTRIM(RTRIM(@cId)))
-                   OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))
-            ) OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId)))
-              OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))
-            ORDER BY SummaryDate DESC, Id DESC";
-        cmd.Parameters.AddWithValue("@cId", collectorId.Trim());
-        using var reader = await cmd.ExecuteReaderAsync();
-        if (await reader.ReadAsync())
+                   OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))";
+            colCmd.Parameters.AddWithValue("@cId", collectorId.Trim());
+            using var colReader = await colCmd.ExecuteReaderAsync();
+            if (await colReader.ReadAsync())
+            {
+                resolvedCollectorId = colReader["CollectorId"].ToString()!;
+                accessLevel = colReader["AccessLevel"]?.ToString() ?? "Collector";
+                if (colReader["LastDayStartDate"] != DBNull.Value)
+                {
+                    lastDayStartDate = Convert.ToDateTime(colReader["LastDayStartDate"]).Date;
+                }
+            }
+        }
+
+        // Admin accounts are exempt from Day-End / Day-Start locks
+        if (accessLevel.Equals("Admin", StringComparison.OrdinalIgnoreCase))
         {
-            bool isFinalized = reader["IsFinalized"] != DBNull.Value && Convert.ToBoolean(reader["IsFinalized"]);
-            DateTime? finalizedAt = reader["FinalizedAt"] != DBNull.Value ? Convert.ToDateTime(reader["FinalizedAt"]) : (DateTime?)null;
-            DateTime? summaryDate = reader["SummaryDate"] != DBNull.Value ? Convert.ToDateTime(reader["SummaryDate"]) : (DateTime?)null;
             return Results.Ok(new 
             { 
-                isFinalized = isFinalized, 
-                finalizedAt = finalizedAt != null ? finalizedAt.Value.ToString("o") : null,
-                summaryDate = summaryDate != null ? summaryDate.Value.ToString("yyyy-MM-dd") : null
+                isFinalized = false, 
+                isLocked = false,
+                lockReason = (string?)null,
+                finalizedAt = (string?)null, 
+                summaryDate = DateTime.Today.ToString("yyyy-MM-dd") 
             });
         }
-        return Results.Ok(new { isFinalized = false, finalizedAt = (string?)null, summaryDate = (string?)null });
+
+        DateTime today = DateTime.Today;
+
+        // 2. Check if Day-End was explicitly finalized (cash out) for today
+        bool isFinalizedToday = false;
+        DateTime? finalizedAt = null;
+        DateTime? summaryDate = null;
+
+        using (var sumCmd = conn.CreateCommand())
+        {
+            sumCmd.CommandText = @"
+                SELECT TOP 1 IsFinalized, FinalizedAt, SummaryDate 
+                FROM DayEndSummaries 
+                WHERE (CollectorId = @cId OR CollectorId = @origId)
+                  AND SummaryDate = @todayDate
+                  AND IsFinalized = 1
+                ORDER BY SummaryDate DESC, Id DESC";
+            sumCmd.Parameters.AddWithValue("@cId", resolvedCollectorId);
+            sumCmd.Parameters.AddWithValue("@origId", collectorId.Trim());
+            sumCmd.Parameters.AddWithValue("@todayDate", today);
+            using var sumReader = await sumCmd.ExecuteReaderAsync();
+            if (await sumReader.ReadAsync())
+            {
+                isFinalizedToday = sumReader["IsFinalized"] != DBNull.Value && Convert.ToBoolean(sumReader["IsFinalized"]);
+                if (sumReader["FinalizedAt"] != DBNull.Value)
+                    finalizedAt = Convert.ToDateTime(sumReader["FinalizedAt"]);
+                if (sumReader["SummaryDate"] != DBNull.Value)
+                    summaryDate = Convert.ToDateTime(sumReader["SummaryDate"]);
+            }
+        }
+
+        // 3. Condition A: If finalized today via cash out -> Locked (DAY_END_FINALIZED)
+        if (isFinalizedToday)
+        {
+            return Results.Ok(new 
+            { 
+                isFinalized = true, 
+                isLocked = true,
+                lockReason = "DAY_END_FINALIZED",
+                finalizedAt = finalizedAt != null ? finalizedAt.Value.ToString("o") : null,
+                summaryDate = summaryDate != null ? summaryDate.Value.ToString("yyyy-MM-dd") : today.ToString("yyyy-MM-dd"),
+                message = "Day-End reconciliation was completed today. Management OTP required to unlock and resume."
+            });
+        }
+
+        // 4. Condition B: If it is a NEW DAY where Day-Start has not been authorized yet -> Locked (NEW_DAY)
+        bool isNewDayUnopened = (lastDayStartDate == null || lastDayStartDate.Value < today);
+        if (isNewDayUnopened)
+        {
+            return Results.Ok(new 
+            { 
+                isFinalized = true, 
+                isLocked = true,
+                lockReason = "NEW_DAY",
+                finalizedAt = lastDayStartDate != null ? lastDayStartDate.Value.ToString("o") : null,
+                summaryDate = today.ToString("yyyy-MM-dd"),
+                message = "New day started. Management OTP required to start today's session."
+            });
+        }
+
+        // 5. Authorized and unlocked for today!
+        return Results.Ok(new 
+            { 
+                isFinalized = false, 
+                isLocked = false,
+                lockReason = (string?)null,
+                finalizedAt = (string?)null, 
+                summaryDate = today.ToString("yyyy-MM-dd") 
+            });
     }
     catch (Exception ex)
     {
         Console.WriteLine($"[GET /api/dayend/status Error]: {ex.Message}");
-        return Results.Ok(new { isFinalized = false, finalizedAt = (string?)null, error = ex.Message });
+        return Results.Ok(new { isFinalized = false, isLocked = false, error = ex.Message });
     }
 });
 
-// 7c. Day Start Action (Unlocks App & Clears Finalized Flag for Collector)
+// 7c. Day Start Action (Unlocks App, records Day-Start Date & Clears Finalized Flag)
 app.MapPost("/api/dayend/start", async (DayStartRequest req) =>
 {
     try
     {
         using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-            UPDATE DayEndSummaries 
-            SET IsFinalized = 0 
-            WHERE CollectorId IN (
-                SELECT CollectorId FROM Collectors 
+
+        string targetId = req.CollectorId.Trim();
+
+        // 1. Update LastDayStartDate in Collectors to today
+        using (var colCmd = conn.CreateCommand())
+        {
+            colCmd.CommandText = @"
+                UPDATE Collectors 
+                SET LastDayStartDate = CAST(GETDATE() AS DATE)
                 WHERE LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId))) 
                    OR LOWER(LTRIM(RTRIM(Username))) = LOWER(LTRIM(RTRIM(@cId)))
-                   OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))
-            ) OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId)))
-              OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))";
-        cmd.Parameters.AddWithValue("@cId", req.CollectorId.Trim());
-        int rows = await cmd.ExecuteNonQueryAsync();
-        return Results.Ok(new { success = true, updatedRows = rows, message = "Day started successfully. Normal access restored." });
+                   OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))";
+            colCmd.Parameters.AddWithValue("@cId", targetId);
+            await colCmd.ExecuteNonQueryAsync();
+        }
+
+        // 2. Clear finalized status on DayEndSummaries for today so operations can proceed
+        using (var sumCmd = conn.CreateCommand())
+        {
+            sumCmd.CommandText = @"
+                UPDATE DayEndSummaries 
+                SET IsFinalized = 0 
+                WHERE (CollectorId IN (
+                    SELECT CollectorId FROM Collectors 
+                    WHERE LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId))) 
+                       OR LOWER(LTRIM(RTRIM(Username))) = LOWER(LTRIM(RTRIM(@cId)))
+                       OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId)))
+                ) OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER(LTRIM(RTRIM(@cId)))
+                  OR LOWER(LTRIM(RTRIM(CollectorId))) = LOWER('COL-' + LTRIM(RTRIM(@cId))))
+                  AND (SummaryDate = CAST(GETDATE() AS DATE) OR IsFinalized = 1)";
+            sumCmd.Parameters.AddWithValue("@cId", targetId);
+            await sumCmd.ExecuteNonQueryAsync();
+        }
+
+        return Results.Ok(new { success = true, message = "Day started successfully. Normal access restored for today." });
     }
     catch (Exception ex)
     {

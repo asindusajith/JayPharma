@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -139,6 +140,7 @@ class AppState extends ChangeNotifier {
   // Day-End Finalization State & Day Start Freeze
   bool isDayEndFinalized = false;
   DateTime? dayEndFinalizedAt;
+  String? dayStartLockReason; // 'NEW_DAY' or 'DAY_END_FINALIZED'
   bool isCheckingDayEndStatus = false;
   bool isRequestingDayStartOtp = false;
   bool isVerifyingDayStartOtp = false;
@@ -957,6 +959,43 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Custom allocation for a specific invoice (partial or custom amount)
+  String? setInvoiceAllocatedAmount(Invoice inv, double newAmount) {
+    if (newAmount < 0) {
+      return currentLanguage == 'si'
+          ? 'මුදල සෘණ අගයක් විය නොහැක.'
+          : 'Amount cannot be negative.';
+    }
+    if (newAmount > inv.outstandingBalance + 0.01) {
+      return currentLanguage == 'si'
+          ? 'වෙන් කරන මුදල ඉන්වොයිසියේ හිඟ මුදලට වඩා වැඩි විය නොහැක (උපරිම: රු. ${inv.outstandingBalance.toStringAsFixed(2)}).'
+          : 'Allocated amount cannot exceed invoice due balance (Max: Rs. ${inv.outstandingBalance.toStringAsFixed(2)}).';
+    }
+
+    final otherAllocated = draftInvoices
+        .where((i) => i.isSelected && i.invoiceNo != inv.invoiceNo)
+        .fold(0.0, (sum, i) => sum + i.allocatedAmount);
+
+    final maxPossibleForThis = (draftPaymentAmount - otherAllocated).clamp(0.0, inv.outstandingBalance);
+
+    if (newAmount > maxPossibleForThis + 0.01) {
+      return currentLanguage == 'si'
+          ? 'වෙන් කරන මුදල ඉතිරි ගෙවීම් මුදලට වඩා වැඩි විය නොහැක (උපරිම: රු. ${maxPossibleForThis.toStringAsFixed(2)}).'
+          : 'Allocated amount cannot exceed available payment amount (Max: Rs. ${maxPossibleForThis.toStringAsFixed(2)}).';
+    }
+
+    if (newAmount <= 0.01) {
+      inv.isSelected = false;
+      inv.allocatedAmount = 0.0;
+    } else {
+      inv.isSelected = true;
+      inv.allocatedAmount = newAmount;
+    }
+
+    notifyListeners();
+    return null;
+  }
+
   /// Returns null on success, or an error message if selection is prevented
   String? toggleInvoiceSelection(int index) {
     if (index < 0 || index >= draftInvoices.length) return 'Invalid invoice index';
@@ -971,6 +1010,24 @@ class AppState extends ChangeNotifier {
     if (draftCustomer == null) {
       return 'Please select a customer.';
     }
+    if (draftPaymentMethod == PaymentMethod.cheque) {
+      final digits = (draftChequeNumber ?? '').replaceAll(RegExp(r'\D'), '');
+      if (digits.isEmpty) {
+        return currentLanguage == 'si'
+            ? 'චෙක්පත් ගෙවීම් සඳහා චෙක්පත් අංකය ඇතුළත් කිරීම අනිවාර්ය වේ.'
+            : 'Cheque number is mandatory for cheque payment.';
+      }
+      if (digits.length != 13) {
+        return currentLanguage == 'si'
+            ? 'චෙක්පත් අංකය සම්පූර්ණයෙන්ම ඇතුළත් කළ යුතුය (ඉලක්කම් 13ක්: චෙක්පත් අංකය, බැංකු කේතය, ශාඛා කේතය). දැනට ඇතුළත් කර ඇත්තේ ඉලක්කම් ${digits.length} කි.'
+            : 'Cheque number must be fully entered (13 digits: Cheque No, Bank Code, Branch Code). Currently entered: ${digits.length}/13 digits.';
+      }
+      if (draftChequeDate == null) {
+        return currentLanguage == 'si'
+            ? 'චෙක්පත් දිනය තෝරාගැනීම අනිවාර්ය වේ.'
+            : 'Cheque date is mandatory for cheque payment.';
+      }
+    }
     if (draftPaymentAmount <= 0) {
       return 'Please enter a valid payment amount greater than zero.';
     }
@@ -979,14 +1036,6 @@ class AppState extends ChangeNotifier {
     }
     if (!isReceiptNumberUnique(draftManualReceiptNo)) {
       return 'Manual receipt number "$draftManualReceiptNo" has already been used. Numbers must be unique and cannot be reused.';
-    }
-    if (draftPaymentMethod == PaymentMethod.cheque) {
-      if (draftChequeNumber == null || draftChequeNumber!.trim().isEmpty) {
-        return 'Cheque number is mandatory for cheque payment.';
-      }
-      if (draftChequeDate == null) {
-        return 'Cheque date is mandatory for cheque payment.';
-      }
     }
     return null; // Valid
   }
@@ -1263,23 +1312,30 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  // Check if Day-End was previously finalized for this collector
+  // Check if Day-End was previously finalized or if today is a New Day requiring OTP
   Future<void> checkDayEndStatus({bool forceServer = false}) async {
     if (currentUser.isAdmin) {
       isDayEndFinalized = false;
       dayEndFinalizedAt = null;
+      dayStartLockReason = null;
       notifyListeners();
       return;
     }
 
     isCheckingDayEndStatus = true;
     try {
-      // 1. First check local storage
+      final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final prefs = await SharedPreferences.getInstance();
+
+      // 1. First check local storage
+      final lastUnlockedDay = prefs.getString('last_unlocked_day_${currentUser.collectorId}');
       final localFinalized = prefs.getBool('day_end_finalized_${currentUser.collectorId}') ?? false;
       final localFinalizedAtStr = prefs.getString('day_end_finalized_at_${currentUser.collectorId}');
-      if (localFinalized) {
+
+      // If local cache indicates finalized today, or today is a new day that hasn't been unlocked yet
+      if (localFinalized || (lastUnlockedDay != null && lastUnlockedDay != todayStr)) {
         isDayEndFinalized = true;
+        dayStartLockReason = (localFinalized && lastUnlockedDay == todayStr) ? 'DAY_END_FINALIZED' : 'NEW_DAY';
         if (localFinalizedAtStr != null) {
           dayEndFinalizedAt = DateTime.tryParse(localFinalizedAtStr) ?? DateTime.now();
         }
@@ -1293,8 +1349,10 @@ class AppState extends ChangeNotifier {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final bool serverFinalized = data['isFinalized'] == true;
+        final bool serverFinalized = (data['isFinalized'] == true || data['isLocked'] == true);
         isDayEndFinalized = serverFinalized;
+        dayStartLockReason = data['lockReason']?.toString();
+
         if (data['finalizedAt'] != null) {
           dayEndFinalizedAt = DateTime.tryParse(data['finalizedAt'].toString()) ?? DateTime.now();
         } else if (!serverFinalized) {
@@ -1303,9 +1361,13 @@ class AppState extends ChangeNotifier {
 
         // Update local cache
         await prefs.setBool('day_end_finalized_${currentUser.collectorId}', serverFinalized);
-        if (dayEndFinalizedAt != null) {
-          await prefs.setString('day_end_finalized_at_${currentUser.collectorId}', dayEndFinalizedAt!.toIso8601String());
+        if (serverFinalized) {
+          if (dayEndFinalizedAt != null) {
+            await prefs.setString('day_end_finalized_at_${currentUser.collectorId}', dayEndFinalizedAt!.toIso8601String());
+          }
         } else {
+          // Authorized for today
+          await prefs.setString('last_unlocked_day_${currentUser.collectorId}', todayStr);
           await prefs.remove('day_end_finalized_at_${currentUser.collectorId}');
         }
       }
@@ -1320,6 +1382,7 @@ class AppState extends ChangeNotifier {
   // Finalize Day-End: locks payment recording and freezes app for this user
   Future<void> finalizeDayEndSummary(String notes) async {
     isDayEndFinalized = true;
+    dayStartLockReason = 'DAY_END_FINALIZED';
     dayEndFinalizedAt = DateTime.now();
     dayStartOtpDispatched = false;
     dayStartError = null;
@@ -1447,15 +1510,18 @@ class AppState extends ChangeNotifier {
         ).timeout(const Duration(seconds: 8));
       } catch (_) {}
 
-      // 3. Clear local freeze state
+      // 3. Clear local freeze state & record today as unlocked
+      final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
       isDayEndFinalized = false;
       dayEndFinalizedAt = null;
+      dayStartLockReason = null;
       dayStartOtpDispatched = false;
       dayStartError = null;
       isVerifyingDayStartOtp = false;
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('day_end_finalized_${currentUser.collectorId}');
+      await prefs.setString('last_unlocked_day_${currentUser.collectorId}', todayStr);
+      await prefs.setBool('day_end_finalized_${currentUser.collectorId}', false);
       await prefs.remove('day_end_finalized_at_${currentUser.collectorId}');
 
       _auditLogs.insert(0, AuditLog(
