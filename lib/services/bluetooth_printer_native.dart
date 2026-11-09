@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'bluetooth_printer_device.dart';
@@ -10,25 +12,64 @@ class BluetoothPrinterService {
   static const String _prefKeyName = 'selected_printer_name';
   static const String _prefKeyPaper = 'selected_printer_paper';
 
+  static const MethodChannel _nativeBtChannel = MethodChannel('com.jaypharma.app/bluetooth');
+
   static BluetoothPrinterDevice? _connectedDevice;
   static BluetoothPrinterDevice? get connectedDevice => _connectedDevice;
 
   /// Check if Bluetooth permissions are granted on Android
   static Future<bool> isPermissionGranted() async {
     try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        final bool? nativeHas = await _nativeBtChannel.invokeMethod<bool>('hasBluetoothPermissions');
+        if (nativeHas == true) return true;
+      }
       return await PrintBluetoothThermal.isPermissionBluetoothGranted;
     } catch (_) {
       return false;
     }
   }
 
-  /// Check if Bluetooth is turned ON
+  /// Request Bluetooth permissions (triggers Android system runtime dialog)
+  static Future<bool> requestPermission() async {
+    try {
+      // 1. Trigger plugin's own permission request
+      final granted = await PrintBluetoothThermal.isPermissionBluetoothGranted;
+      if (granted) return true;
+
+      // 2. Trigger native Android ActivityCompat request
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        await _nativeBtChannel.invokeMethod('requestBluetoothPermissions');
+        await Future.delayed(const Duration(milliseconds: 600));
+        final bool? has = await _nativeBtChannel.invokeMethod<bool>('hasBluetoothPermissions');
+        return has ?? false;
+      }
+      return granted;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Check if Bluetooth is turned ON on the device
   static Future<bool> isBluetoothEnabled() async {
     try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        final bool? nativeEnabled = await _nativeBtChannel.invokeMethod<bool>('isBluetoothEnabled');
+        if (nativeEnabled != null) return nativeEnabled;
+      }
       return await PrintBluetoothThermal.bluetoothEnabled;
     } catch (_) {
       return false;
     }
+  }
+
+  /// Open Android Bluetooth Settings so user can pair a new printer
+  static Future<void> openBluetoothSettings() async {
+    try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        await _nativeBtChannel.invokeMethod('openBluetoothSettings');
+      }
+    } catch (_) {}
   }
 
   /// Check if currently connected to a printer
@@ -45,22 +86,76 @@ class BluetoothPrinterService {
   }
 
   /// Returns list of paired Bluetooth devices on the system
-  static Future<List<BluetoothPrinterDevice>> getPairedDevices() async {
+  /// Combines plugin discovery with native Android BluetoothAdapter fallback
+  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = true}) async {
     try {
-      final list = await PrintBluetoothThermal.pairedBluetooths;
-      final currentConnected = await isConnected();
+      if (requestPerm) {
+        await requestPermission();
+      }
 
+      final currentConnected = await isConnected();
       final prefs = await SharedPreferences.getInstance();
       final savedMac = prefs.getString(_prefKeyMac);
+      final savedName = prefs.getString(_prefKeyName);
 
-      return list.map((info) {
-        final isCur = currentConnected && (_connectedDevice?.address == info.macAdress || savedMac == info.macAdress);
-        return BluetoothPrinterDevice(
-          name: info.name.isNotEmpty ? info.name : 'Bluetooth Printer',
-          address: info.macAdress,
-          isConnected: isCur,
+      final Map<String, BluetoothPrinterDevice> deviceMap = {};
+
+      // 1. Query PrintBluetoothThermal plugin
+      try {
+        final list = await PrintBluetoothThermal.pairedBluetooths;
+        for (final info in list) {
+          final mac = info.macAdress.trim();
+          if (mac.isNotEmpty) {
+            final isCur = currentConnected && (_connectedDevice?.address == mac || savedMac == mac);
+            final devName = info.name.trim().isNotEmpty ? info.name.trim() : 'Bluetooth Printer';
+            deviceMap[mac] = BluetoothPrinterDevice(
+              name: devName,
+              address: mac,
+              isConnected: isCur,
+            );
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) print('[Bluetooth] PrintBluetoothThermal.pairedBluetooths: $e');
+      }
+
+      // 2. Query Native Android BluetoothAdapter.bondedDevices (Direct Fallback)
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        try {
+          final List<dynamic>? nativeList = await _nativeBtChannel.invokeMethod<List<dynamic>>('getBondedDevices');
+          if (nativeList != null) {
+            for (final item in nativeList) {
+              if (item is Map) {
+                final address = (item['address'] ?? '').toString().trim();
+                final name = (item['name'] ?? '').toString().trim();
+                if (address.isNotEmpty) {
+                  final isCur = currentConnected && (_connectedDevice?.address == address || savedMac == address);
+                  if (!deviceMap.containsKey(address) || deviceMap[address]!.name == 'Bluetooth Printer') {
+                    deviceMap[address] = BluetoothPrinterDevice(
+                      name: name.isNotEmpty ? name : 'Bluetooth Printer',
+                      address: address,
+                      isConnected: isCur,
+                    );
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          if (kDebugMode) print('[Bluetooth] Native bondedDevices error: $e');
+        }
+      }
+
+      // 3. If a saved printer exists but wasn't found in current scan, retain it
+      if (savedMac != null && savedMac.isNotEmpty && !deviceMap.containsKey(savedMac)) {
+        deviceMap[savedMac] = BluetoothPrinterDevice(
+          name: savedName ?? 'Saved Bluetooth Printer',
+          address: savedMac,
+          isConnected: currentConnected && _connectedDevice?.address == savedMac,
         );
-      }).toList();
+      }
+
+      return deviceMap.values.toList();
     } catch (e) {
       if (kDebugMode) print('getPairedDevices error: $e');
       return [];
@@ -73,16 +168,17 @@ class BluetoothPrinterService {
       // Disconnect current if any
       await disconnect();
 
-      final success = await PrintBluetoothThermal.connect(macPrinterAddress: macAddress);
+      final cleanMac = macAddress.trim();
+      final success = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac);
       if (success) {
         _connectedDevice = BluetoothPrinterDevice(
           name: printerName ?? 'Bluetooth Thermal Printer',
-          address: macAddress,
+          address: cleanMac,
           isConnected: true,
         );
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_prefKeyMac, macAddress);
+        await prefs.setString(_prefKeyMac, cleanMac);
         if (printerName != null) {
           await prefs.setString(_prefKeyName, printerName);
         }
@@ -158,4 +254,3 @@ class BluetoothPrinterService {
     return null;
   }
 }
-

@@ -1,24 +1,32 @@
 package lk.jaypharma.jaypharma
 
+import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.jaypharma.app/kiosk"
+    private val KIOSK_CHANNEL = "com.jaypharma.app/kiosk"
+    private val BT_CHANNEL = "com.jaypharma.app/bluetooth"
     private val PREFS_NAME = "JayPharmaKiosk"
     private val KEY_KIOSK = "kiosk_enabled"
+    private val BT_PERMISSION_REQ_CODE = 4101
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        // 1. Kiosk / Dedicated POS Channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, KIOSK_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "enableAppLock" -> {
                     val success = setKioskMode(true)
@@ -38,6 +46,95 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+
+        // 2. Direct Bluetooth POS Printer Helper Channel (Native Fallback & Permission Manager)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BT_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isBluetoothEnabled" -> {
+                    try {
+                        val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                        val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                        result.success(adapter?.isEnabled == true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "hasBluetoothPermissions" -> {
+                    result.success(checkBtPermissions())
+                }
+                "requestBluetoothPermissions" -> {
+                    requestBtPermissions()
+                    result.success(true)
+                }
+                "getBondedDevices" -> {
+                    try {
+                        val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                        val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                        val list = mutableListOf<Map<String, String>>()
+                        val bonded = adapter?.bondedDevices
+                        bonded?.forEach { dev ->
+                            val devName = try {
+                                val n = dev.name
+                                if (!n.isNullOrBlank()) n else "Bluetooth Device"
+                            } catch (_: Exception) {
+                                "Bluetooth Device"
+                            }
+                            list.add(mapOf(
+                                "name" to devName,
+                                "address" to dev.address
+                            ))
+                        }
+                        result.success(list)
+                    } catch (e: Exception) {
+                        result.success(emptyList<Map<String, String>>())
+                    }
+                }
+                "openBluetoothSettings" -> {
+                    try {
+                        val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun checkBtPermissions(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestBtPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                    Manifest.permission.BLUETOOTH_SCAN
+                ),
+                BT_PERMISSION_REQ_CODE
+            )
+        } else {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(
+                    Manifest.permission.BLUETOOTH,
+                    Manifest.permission.BLUETOOTH_ADMIN,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ),
+                BT_PERMISSION_REQ_CODE
+            )
         }
     }
 

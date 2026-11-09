@@ -27,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isConnectingPrinter = false;
   bool _isPrintingTest = false;
   bool _is80mm = true;
+  bool _isBluetoothEnabled = true;
 
   bool _isAppLockEnabled = false;
   bool _isTogglingAppLock = false;
@@ -127,7 +128,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadBluetoothPrinters() async {
     setState(() => _isScanningPrinters = true);
     try {
-      final devices = await BluetoothPrinterService.getPairedDevices();
+      final isBtOn = await BluetoothPrinterService.isBluetoothEnabled();
+      _isBluetoothEnabled = isBtOn;
+
+      final devices = await BluetoothPrinterService.getPairedDevices(requestPerm: true);
       final saved = await BluetoothPrinterService.getSavedPrinter();
 
       BluetoothPrinterDevice? current;
@@ -228,6 +232,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  void _showManualMacDialog(BuildContext context, String lang) {
+    final isSi = lang == 'si';
+    final macController = TextEditingController(text: _selectedPrinterDevice?.address ?? '');
+    final nameController = TextEditingController(text: _selectedPrinterDevice?.name ?? 'Bluetooth Thermal Printer');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.bluetooth_searching, color: AppTheme.primaryBlue, size: 22),
+            const SizedBox(width: 8),
+            Text(
+              isSi ? 'සෘජු MAC ලිපිනයෙන් සම්බන්ධ වන්න' : 'Connect by MAC Address',
+              style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isSi
+                  ? 'Bluetooth මුද්‍රණ යන්ත්‍රයේ යට ඇති ලේබලයේ හෝ Self-Test රිසිට්පතේ සඳහන් Bluetooth MAC Address එක ඇතුළත් කරන්න:'
+                  : 'Enter the Bluetooth MAC Address from the thermal printer label or self-test printout:',
+              style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameController,
+              decoration: InputDecoration(
+                labelText: isSi ? 'මුද්‍රණ යන්ත්‍රයේ නම' : 'Printer Model / Name',
+                hintText: 'e.g. POS-80 / RPP02N / MTP-II',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: macController,
+              decoration: InputDecoration(
+                labelText: isSi ? 'Bluetooth MAC Address (අනිවාර්යයි)' : 'Bluetooth MAC Address (Required)',
+                hintText: 'e.g. 66:02:BD:06:18:7B',
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(LocalizationService.tr('cancel', lang: lang)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryBlue,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              final mac = macController.text.trim();
+              final name = nameController.text.trim().isNotEmpty ? nameController.text.trim() : 'Bluetooth POS Printer';
+              if (mac.isEmpty) return;
+              Navigator.pop(ctx);
+              final device = BluetoothPrinterDevice(name: name, address: mac);
+              setState(() {
+                if (!_pairedPrinters.any((p) => p.address == mac)) {
+                  _pairedPrinters.add(device);
+                }
+                _selectedPrinterDevice = device;
+              });
+              await _connectToPrinter(device, lang);
+            },
+            child: Text(isSi ? 'සම්බන්ධ වන්න' : 'Connect'),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -293,6 +377,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ],
                         ),
                         const SizedBox(height: 8),
+
+                        if (!_isBluetoothEnabled)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF2F2),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFFFCA5A5)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.bluetooth_disabled, color: AppTheme.dangerRed, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    lang == 'si' ? 'බ්ලූටූත් ක්‍රියාත්මක කර නැත. දුරකථනයේ Bluetooth On කරන්න.' : 'Bluetooth is turned OFF. Please turn on Bluetooth.',
+                                    style: GoogleFonts.inter(fontSize: 11, color: AppTheme.dangerRed, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                InkWell(
+                                  onTap: () => BluetoothPrinterService.openBluetoothSettings(),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                    child: Text(
+                                      lang == 'si' ? 'On කරන්න' : 'Settings',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.dangerRed),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
 
                         // Dropdown with Paired Bluetooth Devices
                         DropdownButtonFormField<BluetoothPrinterDevice>(
@@ -362,6 +479,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             }
                           },
                         ),
+                        const SizedBox(height: 8),
+
+                        // Action Buttons: Manual MAC + Phone Settings + Scan
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.add_link_rounded, size: 16),
+                                label: Text(
+                                  lang == 'si' ? '+ MAC ලිපිනය' : '+ Enter MAC',
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  side: const BorderSide(color: Color(0xFFCBD5E1)),
+                                  foregroundColor: AppTheme.primaryBlue,
+                                ),
+                                onPressed: () => _showManualMacDialog(context, lang),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.settings_bluetooth_rounded, size: 16),
+                                label: Text(
+                                  lang == 'si' ? 'BT Settings' : 'Pair in Settings',
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  side: const BorderSide(color: Color(0xFFCBD5E1)),
+                                  foregroundColor: const Color(0xFF334155),
+                                ),
+                                onPressed: () => BluetoothPrinterService.openBluetoothSettings(),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: _isScanningPrinters
+                                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Icon(Icons.refresh_rounded, size: 20, color: AppTheme.primaryBlue),
+                              tooltip: lang == 'si' ? 'අවසර ලබා ගෙන නැවත සොයන්න (Scan)' : 'Grant Permission & Re-scan',
+                              onPressed: _isScanningPrinters ? null : _loadBluetoothPrinters,
+                            ),
+                          ],
+                        ),
+
+                        if (_pairedPrinters.isEmpty && !_isScanningPrinters) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFFBFDBFE)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.info_outline, size: 14, color: Color(0xFF1D4ED8)),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      lang == 'si' ? 'මුද්‍රණ යන්ත්‍රය හමු නොවූයේද?' : 'Printer not showing in list?',
+                                      style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: const Color(0xFF1D4ED8)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  lang == 'si'
+                                      ? '1. දුරකථනයේ "BT Settings" වෙත ගොස් Printer එක Pair කර ඇත්දැයි බලන්න.\n2. ඉහත Refresh (🔄) ඔබා Android Bluetooth Permission "Allow" කරන්න.\n3. නැතහොත් "+ MAC ලිපිනය" ඔබා Printer එකේ MAC Address එක සෘජුව ඇතුළත් කරන්න.'
+                                      : '1. Check "BT Settings" to confirm the printer is paired.\n2. Tap Refresh (🔄) and tap "Allow" on Bluetooth permission dialog.\n3. Or tap "+ Enter MAC" to connect directly using its MAC address.',
+                                  style: GoogleFonts.inter(fontSize: 10.5, color: const Color(0xFF1E3A8A), height: 1.35),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 10),
 
                         // Connection Status Banner & Action Button

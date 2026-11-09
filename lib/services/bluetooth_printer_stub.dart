@@ -14,7 +14,9 @@ class BluetoothPrinterService {
   static BluetoothPrinterDevice? get connectedDevice => _connectedDevice;
 
   static Future<bool> isPermissionGranted() async => true;
+  static Future<bool> requestPermission() async => true;
   static Future<bool> isBluetoothEnabled() async => true;
+  static Future<void> openBluetoothSettings() async {}
 
   static Future<bool> isConnected() async {
     return _connectedDevice != null && _connectedDevice!.isConnected;
