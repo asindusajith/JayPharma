@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../models/receipt.dart';
 import '../../providers/app_state.dart';
-import '../../services/localization_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/collector_route_map_view.dart';
 

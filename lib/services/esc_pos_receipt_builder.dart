@@ -10,17 +10,17 @@ class EscPosReceiptBuilder {
     List<int> bytes = [];
 
     // 1. Copy 1: Customer Copy
-    bytes += _buildSingleCopy(generator, receipt, '*** Customer Copy ***', isReprint: isReprint);
+    bytes += _buildSingleCopy(generator, receipt, 'CUSTOMER COPY', isReprint: isReprint);
 
     // 2. Cut Here Divider
     bytes += generator.feed(1);
-    bytes += generator.text('============================================', styles: const PosStyles(align: PosAlign.center, bold: true));
+    bytes += generator.text('--------------------------------------------', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text('- - - - - - - - - CUT HERE - - - - - - - - -', styles: const PosStyles(align: PosAlign.center, bold: true));
-    bytes += generator.text('============================================', styles: const PosStyles(align: PosAlign.center, bold: true));
+    bytes += generator.text('--------------------------------------------', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.feed(1);
 
     // 3. Copy 2: Accounts Copy
-    bytes += _buildSingleCopy(generator, receipt, '*** Accounts Copy ***', isReprint: isReprint);
+    bytes += _buildSingleCopy(generator, receipt, 'ACCOUNTS COPY', isReprint: isReprint);
 
     // Final feed and paper cut
     bytes += generator.feed(3);
@@ -52,9 +52,9 @@ class EscPosReceiptBuilder {
 
     // Copy Title & Document Title
     bytes += generator.text(copyTitle, styles: const PosStyles(align: PosAlign.center, bold: true));
-    bytes += generator.text('*** OFFICIAL RECEIPT ***', styles: const PosStyles(align: PosAlign.center, bold: true));
+    bytes += generator.text('OFFICIAL RECEIPT', styles: const PosStyles(align: PosAlign.center, bold: true));
     if (isReprint || receipt.reprintCount > 0) {
-      bytes += generator.text('*** DUPLICATE COPY (REPRINT) ***', styles: const PosStyles(align: PosAlign.center, bold: true));
+      bytes += generator.text('DUPLICATE COPY (REPRINT)', styles: const PosStyles(align: PosAlign.center, bold: true));
     }
     bytes += generator.hr();
 
@@ -175,21 +175,57 @@ class EscPosReceiptBuilder {
     bytes += generator.hr();
 
     // Footer
-    bytes += generator.text(receipt.customerName, styles: const PosStyles(align: PosAlign.center, bold: true));
-    bytes += generator.text('Hope to See you Soon', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text('Received with thanks.', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.feed(1);
+    bytes += generator.feed(2);
 
     // Signatures & Customer Seal Box
-    bytes += generator.text('+------------------+  +--------------------+');
-    bytes += generator.text('|                  |  |                    |');
-    bytes += generator.text('|                  |  |   CUSTOMER SEAL    |');
-    bytes += generator.text('|                  |  |   (STAMP HERE)     |');
-    bytes += generator.text('|                  |  |                    |');
-    bytes += generator.text('+------------------+  +--------------------+');
-    bytes += generator.text('____________________  ______________________');
-    bytes += generator.text('Collector Signature   Customer Signature    ');
-    bytes += generator.text('(${receipt.collectorName})   (Authorized Seal)    ');
+    bytes += generator.row([
+      PosColumn(
+        text: '.....................',
+        width: 6,
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+      PosColumn(
+        text: '[ CUSTOMER SEAL ]',
+        width: 6,
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      ),
+    ]);
+    bytes += generator.row([
+      PosColumn(
+        text: 'Collector Signature',
+        width: 6,
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      ),
+      PosColumn(
+        text: '.....................',
+        width: 6,
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+    ]);
+    bytes += generator.row([
+      PosColumn(
+        text: '(${receipt.collectorName})',
+        width: 6,
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+      PosColumn(
+        text: 'Customer Signature',
+        width: 6,
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      ),
+    ]);
+    bytes += generator.row([
+      PosColumn(
+        text: '',
+        width: 6,
+      ),
+      PosColumn(
+        text: '(Authorized Seal & Sign)',
+        width: 6,
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+    ]);
 
     bytes += generator.feed(1);
     bytes += generator.text('Developed By Ceyloninnovation.com', styles: const PosStyles(align: PosAlign.center, bold: true));

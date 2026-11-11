@@ -1,11 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../providers/app_state.dart';
-import '../../models/app_user.dart';
-import '../../models/customer.dart';
 import '../../theme/app_theme.dart';
 import '../../services/localization_service.dart';
 import 'package:pdf/pdf.dart';
@@ -106,7 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => _isTogglingAppLock = true);
     try {
-      final success = await AppLockService.setAppLockEnabled(enable);
+      await AppLockService.setAppLockEnabled(enable);
       if (mounted) {
         setState(() => _isAppLockEnabled = enable);
         ScaffoldMessenger.of(context).showSnackBar(

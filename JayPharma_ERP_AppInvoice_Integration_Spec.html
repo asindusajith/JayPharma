@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>JayPharma Mobile App - ERP Database Integration Specification</title>
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 12mm 14mm 12mm 14mm;
+  }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #1e293b;
+    background: #ffffff;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .header {
+    border-bottom: 2px solid #2563eb;
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .header-left h1 {
+    font-size: 20px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.5px;
+  }
+  .header-left .subtitle {
+    font-size: 12px;
+    color: #2563eb;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+  .header-right {
+    text-align: right;
+    font-size: 10px;
+    color: #64748b;
+  }
+  .header-right .badge-version {
+    background: #eff6ff;
+    color: #1d4ed8;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 10px;
+    display: inline-block;
+    border: 1px solid #bfdbfe;
+    margin-bottom: 3px;
+  }
+
+  .card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+  .card-blue {
+    background: #f0f7ff;
+    border-color: #bfdbfe;
+  }
+  .card-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .card-blue .card-title {
+    color: #1e40af;
+  }
+
+  h2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 14px 0 6px 0;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e2e8f0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 12px;
+    font-size: 10px;
+  }
+  th {
+    background: #0f172a;
+    color: #ffffff;
+    font-weight: 600;
+    text-align: left;
+    padding: 6px 8px;
+    border: 1px solid #0f172a;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  td {
+    padding: 5.5px 8px;
+    border: 1px solid #cbd5e1;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td {
+    background: #f8fafc;
+  }
+  .col-name {
+    font-family: Consolas, "Courier New", monospace;
+    font-weight: 700;
+    color: #0f172a;
+    white-space: nowrap;
+  }
+  .col-type {
+    font-family: Consolas, "Courier New", monospace;
+    color: #64748b;
+    font-size: 9px;
+    white-space: nowrap;
+  }
+  .col-ex {
+    font-family: Consolas, "Courier New", monospace;
+    color: #0369a1;
+    font-size: 9px;
+    background: #f0f9ff;
+    padding: 1px 4px;
+    border-radius: 3px;
+    border: 1px solid #e0f2fe;
+    display: inline-block;
+  }
+  .tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 8.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .tag-green { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+  .tag-blue { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+  .tag-amber { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+
+  .code-block {
+    background: #0f172a;
+    color: #e2e8f0;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 9.5px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    line-height: 1.4;
+    margin-bottom: 10px;
+    overflow-x: hidden;
+  }
+  .code-kw { color: #38bdf8; font-weight: 700; }
+  .code-fn { color: #f472b6; }
+  .code-str { color: #a3e635; }
+  .code-cm { color: #64748b; font-style: italic; }
+
+  .page-break {
+    page-break-before: always;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .scenario-card {
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    padding: 7px 9px;
+    background: #ffffff;
+  }
+  .scenario-title {
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 3px;
+    font-size: 10.5px;
+  }
+
+  .footer {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #e2e8f0;
+    font-size: 9px;
+    color: #64748b;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Page 1 Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>JayPharma Mobile ERP Integration</h1>
+      <div class="subtitle">Main ERP Database Integration & Schema Specification</div>
+    </div>
+    <div class="header-right">
+      <div class="badge-version">API v1.0.2 • Production Ready</div>
+      <div>Target System: Microsoft SQL Server</div>
+      <div>Document Date: November 2026</div>
+    </div>
+  </div>
+
+  <!-- Executive Summary -->
+  <div class="card card-blue">
+    <div class="card-title">📌 Executive Overview for Main System Engineers</div>
+    <p>
+      The <strong>JayPharma Mobile Field Collection Application</strong> is used by field medical representatives and collection agents to collect cash/cheque payments from pharmacies and hospital accounts. When an agent confirms a collection on their mobile device, the JayPharma backend service immediately writes the settlement data to the <strong>Main ERP SQL Server Database</strong>.
+    </p>
+    <p style="margin-top: 4px;">
+      <strong>Critical Safety Architecture:</strong> The mobile application <strong>NEVER writes to, alters, or locks the <code>dbo.Invoice</code> table directly</strong>. Instead, all field collections are inserted as pending audit records into <strong><code>dbo.AppInvoice</code></strong> and <strong><code>dbo.DPay</code></strong>. This guarantees 100% data integrity, prevents concurrency collisions with head-office ERP billing users, and provides complete traceability with receipt numbers, collector IDs, and GPS stamps.
+    </p>
+  </div>
+
+  <!-- High Level Architecture Flow -->
+  <h2>1. Data Flow Architecture</h2>
+  <div class="code-block">
+[Field Agent Mobile App] ──(HTTP JSON / SSL)──► [JayPharma API Gateway]
+                                                        │
+         ┌──────────────────────────────────────────────┴──────────────────────────────────────────────┐
+         ▼                                                                                            ▼
+[JayPharmaApp Database]                                                                    [Main ERP SQL Server]
+ • Receipts (Header & Metadata)                                                             • dbo.AppInvoice (Invoice settlements)
+ • ReceiptInvoiceItems (Allocations)                                                        • dbo.DPay (Daily collection ledger)
+ • AuditLogs (Collector & GPS stamp)                                                        (dbo.Invoice remains read-only for field app)
+  </div>
+
+  <!-- Table 1: dbo.AppInvoice Specification -->
+  <h2>2. Primary Table: <code>dbo.AppInvoice</code> Column Data Dictionary</h2>
+  <p style="margin-bottom: 6px; color: #475569; font-size: 10px;">
+    Every time a receipt is issued, one or more rows are inserted into <code>dbo.AppInvoice</code> (one row per allocated invoice, or one row for unallocated advance).
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 14%;">Column Name</th>
+        <th style="width: 12%;">Data Type</th>
+        <th style="width: 32%;">Description & Business Purpose</th>
+        <th style="width: 24%;">Source Value from Mobile App</th>
+        <th style="width: 18%;">Sample Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="col-name">InvNo</td>
+        <td class="col-type">INT</td>
+        <td>Target Invoice Number being settled. <br><em>Set to 0 if this is an Advance payment without invoice.</em></td>
+        <td>Numeric invoice ID from customer dues list, or <code>0</code></td>
+        <td><span class="col-ex">260928001</span> / <span class="col-ex">0</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Date</td>
+        <td class="col-type">DATETIME</td>
+        <td>Transaction / Receipt date recorded at collection.</td>
+        <td>Server current date (<code>DateTime.Now.Date</code>)</td>
+        <td><span class="col-ex">2026-11-11</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">CCode</td>
+        <td class="col-type">INT</td>
+        <td>Customer Account Code in Main ERP.</td>
+        <td>Customer numeric ID code</td>
+        <td><span class="col-ex">65714304</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">CName</td>
+        <td class="col-type">NVARCHAR(150)</td>
+        <td>Registered Customer / Pharmacy / Hospital name.</td>
+        <td>Customer name snapshot at time of payment</td>
+        <td><span class="col-ex">B.I.B. Pharmaceuticals</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">InVal</td>
+        <td class="col-type">DECIMAL(18,2)</td>
+        <td>Total original face value of the invoice. <em>(0 for Advance)</em></td>
+        <td><code>InvoiceAmount</code> from ERP Invoice</td>
+        <td><span class="col-ex">34444.00</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">SetAmt</td>
+        <td class="col-type">DECIMAL(18,2)</td>
+        <td><strong>Amount settled towards this specific invoice</strong> by this receipt.</td>
+        <td>Allocated collection portion (Rs.)</td>
+        <td><span class="col-ex">1000.00</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Branch</td>
+        <td class="col-type">NVARCHAR(50)</td>
+        <td>Company Operating Branch / Division name.</td>
+        <td>Constant string identifier</td>
+        <td><span class="col-ex">'Jay Pharma'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">SettleType</td>
+        <td class="col-type">NVARCHAR(50)</td>
+        <td>Settlement status category: <br>
+          <span class="tag tag-green">Settled</span> (Fully cleared, remaining balance &le; 0.01)<br>
+          <span class="tag tag-blue">Part Settled</span> (Partial payment, balance remains)<br>
+          <span class="tag tag-amber">Advance</span> (Payment on account / unallocated)
+        </td>
+        <td>Evaluated dynamically based on remaining balance</td>
+        <td><span class="col-ex">'Settled'</span> / <span class="col-ex">'Part Settled'</span> / <span class="col-ex">'Advance'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">CrPeriod</td>
+        <td class="col-type">INT</td>
+        <td>Credit period days placeholder.</td>
+        <td>Default fixed integer</td>
+        <td><span class="col-ex">0</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">DOther1</td>
+        <td class="col-type">DECIMAL(18,2)</td>
+        <td><strong>Remaining Balance</strong> on this invoice after applying <code>SetAmt</code>.</td>
+        <td><code>InvoiceAmount - TotalSettledSoFar</code></td>
+        <td><span class="col-ex">33444.00</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">DOther2</td>
+        <td class="col-type">DECIMAL(18,2)</td>
+        <td><strong>Total Receipt Grand Total</strong> (entire payment amount collected).</td>
+        <td>Total sum collected across all items</td>
+        <td><span class="col-ex">1000.00</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Other1</td>
+        <td class="col-type">NVARCHAR(50)</td>
+        <td><strong>Manual Receipt Number (MR No)</strong> generated by mobile app.</td>
+        <td>Collector-scoped receipt number</td>
+        <td><span class="col-ex">'KANDY-026482'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Other2</td>
+        <td class="col-type">NVARCHAR(150)</td>
+        <td>Collector identification and full name tag.</td>
+        <td><code>'Collector: ' + CollectorName</code></td>
+        <td><span class="col-ex">'Collector: kandy'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">PayType</td>
+        <td class="col-type">NVARCHAR(20)</td>
+        <td>Payment instrument method.</td>
+        <td><code>'CASH'</code> or <code>'CHEQUE'</code></td>
+        <td><span class="col-ex">'CASH'</span> / <span class="col-ex">'CHEQUE'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Bank</td>
+        <td class="col-type">NVARCHAR(100)</td>
+        <td>Drawee Bank name (for Cheque payments).</td>
+        <td>Bank name, or empty string <code>""</code> for Cash</td>
+        <td><span class="col-ex">'Commercial Bank'</span> / <span class="col-ex">''</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">ChequeBranch</td>
+        <td class="col-type">NVARCHAR(100)</td>
+        <td>Bank branch name for cheques, or location fallback for Cash.</td>
+        <td>Branch name or location string</td>
+        <td><span class="col-ex">'Peradeniya'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">ChequeNo</td>
+        <td class="col-type">NVARCHAR(50)</td>
+        <td>Cheque leaf number (for Cheque payments).</td>
+        <td>Cheque number, or empty string <code>""</code> for Cash</td>
+        <td><span class="col-ex">'CHQ994821'</span> / <span class="col-ex">''</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">ChequeDate</td>
+        <td class="col-type">DATETIME</td>
+        <td>Realization date written on cheque (Post-dated or current).</td>
+        <td>Cheque date, or <code>NULL</code> if Cash</td>
+        <td><span class="col-ex">2026-11-25</span> / <span class="col-ex">NULL</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Details1</td>
+        <td class="col-type">NVARCHAR(250)</td>
+        <td>Collector field comments and special payment remarks.</td>
+        <td>Agent notes, or empty string <code>""</code></td>
+        <td><span class="col-ex">'Settled before delivery'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Details2</td>
+        <td class="col-type">NVARCHAR(250)</td>
+        <td><strong>GPS Coordinates and Physical Geolocation Address</strong>.</td>
+        <td>Resolved GPS coordinate & physical address</td>
+        <td><span class="col-ex">'GPS: 6.9271, 79.8612 - Colombo'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Details3</td>
+        <td class="col-type">NVARCHAR(150)</td>
+        <td>Reserved extension attribute.</td>
+        <td>Empty string default (<code>""</code>)</td>
+        <td><span class="col-ex">''</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Page Break for Clean Printing -->
+  <div class="page-break"></div>
+
+  <!-- Header for Page 2 -->
+  <div class="header">
+    <div class="header-left">
+      <h1>JayPharma Mobile ERP Integration</h1>
+      <div class="subtitle">Section 3: DPay Ledger & Business Allocation Scenarios</div>
+    </div>
+    <div class="header-right">
+      <div class="badge-version">Page 2 of 2</div>
+      <div>Technical Reference</div>
+    </div>
+  </div>
+
+  <!-- Table 2: dbo.DPay Specification -->
+  <h2>3. Accompanying Table: <code>dbo.DPay</code> (Daily Payment Register)</h2>
+  <p style="margin-bottom: 6px; color: #475569; font-size: 10px;">
+    Simultaneously with <code>AppInvoice</code>, each payment row is inserted into <code>dbo.DPay</code> to feed standard ERP daily collection, cashier reconciliation, and audit reports.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 14%;">Column Name</th>
+        <th style="width: 13%;">Data Type</th>
+        <th style="width: 45%;">Description & Value Mapping</th>
+        <th style="width: 28%;">Sample Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="col-name">RNo</td>
+        <td class="col-type">INT</td>
+        <td>Sequential register payment identifier: <code>ISNULL(MAX(RNo), 0) + 1</code>.</td>
+        <td><span class="col-ex">14820</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Date</td>
+        <td class="col-type">DATETIME</td>
+        <td>Transaction date (<code>DateTime.Now.Date</code>).</td>
+        <td><span class="col-ex">2026-11-11</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">InvNo</td>
+        <td class="col-type">INT</td>
+        <td>Invoice number (or <code>0</code> for Advance payment).</td>
+        <td><span class="col-ex">260928001</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">CCode / Name</td>
+        <td class="col-type">INT / NVARCHAR</td>
+        <td>Customer Code and Customer Business Name.</td>
+        <td><span class="col-ex">65714304</span> / <span class="col-ex">'B.I.B. Pharmaceuticals'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Branch</td>
+        <td class="col-type">NVARCHAR(50)</td>
+        <td>Branch identifier: <code>'Jay Pharma'</code>.</td>
+        <td><span class="col-ex">'Jay Pharma'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Details</td>
+        <td class="col-type">NVARCHAR(150)</td>
+        <td>Audit log summary: <code>'Field Payment by ' + CollectorName</code>.</td>
+        <td><span class="col-ex">'Field Payment by kandy'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Amount</td>
+        <td class="col-type">DECIMAL(18,2)</td>
+        <td>Settled amount (Rs.) allocated to this record.</td>
+        <td><span class="col-ex">1000.00</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">Type</td>
+        <td class="col-type">NVARCHAR(20)</td>
+        <td>Payment mode: <code>'Cash'</code> or <code>'Cheque'</code>.</td>
+        <td><span class="col-ex">'Cash'</span> / <span class="col-ex">'Cheque'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">CheNo / PDDate</td>
+        <td class="col-type">NVARCHAR / NVARCHAR</td>
+        <td>Cheque number and Post-dated string (format: <code>'dd/MM/yyyy'</code>).</td>
+        <td><span class="col-ex">'CHQ994821'</span> / <span class="col-ex">'25/11/2026'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">[Check] / Audit</td>
+        <td class="col-type">NVARCHAR(50)</td>
+        <td>Initial verification flags: <code>'Pending'</code> (ready for head-office accounts clearance).</td>
+        <td><span class="col-ex">'Pending'</span>, <span class="col-ex">'Pending'</span></td>
+      </tr>
+      <tr>
+        <td class="col-name">MRNo</td>
+        <td class="col-type">INT</td>
+        <td>Numeric portion of Manual Receipt Number (e.g. from <code>'KANDY-026482'</code>).</td>
+        <td><span class="col-ex">26482</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Section 4: Settlement Scenarios -->
+  <h2>4. Business Logic & Allocation Scenarios</h2>
+  <div class="grid-2">
+    <div class="scenario-card">
+      <div class="scenario-title">Scenario A: Exact or Partial Single Invoice</div>
+      <p style="color: #475569;">
+        Agent collects Rs. 10,000 for Invoice #101 (Val: Rs. 25,000).<br>
+        &bull; <code>InvNo = 101</code>, <code>InVal = 25000</code>, <code>SetAmt = 10000</code><br>
+        &bull; <code>SettleType = 'Part Settled'</code>, <code>DOther1 = 15000</code><br>
+        &bull; <code>Other1 = 'MR-001'</code>, <code>DOther2 = 10000</code>
+      </p>
+    </div>
+    <div class="scenario-card">
+      <div class="scenario-title">Scenario B: Multi-Invoice Split Payment</div>
+      <p style="color: #475569;">
+        Agent collects Rs. 30,000 to settle Invoice #101 (Rs. 10,000) and Invoice #102 (Rs. 20,000).<br>
+        &bull; <strong>Row 1:</strong> <code>InvNo = 101</code>, <code>SetAmt = 10000</code>, <code>Other1 = 'MR-002'</code><br>
+        &bull; <strong>Row 2:</strong> <code>InvNo = 102</code>, <code>SetAmt = 20000</code>, <code>Other1 = 'MR-002'</code><br>
+        <em>Both rows share the exact same Receipt No (Other1).</em>
+      </p>
+    </div>
+    <div class="scenario-card">
+      <div class="scenario-title">Scenario C: Pure Advance Payment (No Invoices)</div>
+      <p style="color: #475569;">
+        Customer pays Rs. 50,000 on account before billing.<br>
+        &bull; <code>InvNo = 0</code>, <code>InVal = 0</code>, <code>SetAmt = 50000</code><br>
+        &bull; <code>SettleType = 'Advance'</code>, <code>DOther1 = 0</code>, <code>DOther2 = 50000</code><br>
+        &bull; DPay entry records <code>InvNo = 0</code> with full amount.
+      </p>
+    </div>
+    <div class="scenario-card">
+      <div class="scenario-title">Scenario D: Overpayment with Excess Balance</div>
+      <p style="color: #475569;">
+        Customer has Rs. 10,000 invoice, but hands over Rs. 15,000.<br>
+        &bull; <strong>Row 1:</strong> <code>InvNo = 101</code>, <code>SetAmt = 10000</code>, <code>SettleType = 'Settled'</code><br>
+        &bull; <strong>Row 2:</strong> <code>InvNo = 0</code>, <code>SetAmt = 5000</code>, <code>SettleType = 'Advance'</code><br>
+        <em>Excess is automatically preserved as an Advance row!</em>
+      </p>
+    </div>
+  </div>
+
+  <!-- Section 5: ERP SQL Query Example -->
+  <h2>5. How ERP Computes Effective Realtime Balance (Query Example)</h2>
+  <div class="code-block">
+<span class="code-cm">-- Recommended SQL View / Query to compute Real-Time Customer Outstanding:</span>
+<span class="code-kw">SELECT</span> 
+    i.InvNo,
+    i.CCode,
+    i.CName,
+    i.Date <span class="code-kw">AS</span> InvoiceDate,
+    i.InVal <span class="code-kw">AS</span> OriginalAmount,
+    (ISNULL(i.SetAmt, 0) + ISNULL(app.AppSettled, 0)) <span class="code-kw">AS</span> TotalSettledAmount,
+    (i.InVal - (ISNULL(i.SetAmt, 0) + ISNULL(app.AppSettled, 0))) <span class="code-kw">AS</span> EffectiveOutstandingBalance,
+    <span class="code-kw">CASE</span> 
+        <span class="code-kw">WHEN</span> (i.InVal - (ISNULL(i.SetAmt, 0) + ISNULL(app.AppSettled, 0))) &lt;= 0.01 <span class="code-kw">THEN</span> <span class="code-str">'Settled'</span>
+        <span class="code-kw">WHEN</span> (ISNULL(i.SetAmt, 0) + ISNULL(app.AppSettled, 0)) &gt; 0 <span class="code-kw">THEN</span> <span class="code-str">'Part Settled'</span>
+        <span class="code-kw">ELSE</span> ISNULL(i.SettleType, <span class="code-str">'Pending'</span>)
+    <span class="code-kw">END AS</span> CurrentStatus
+<span class="code-kw">FROM</span> dbo.Invoice i
+<span class="code-kw">LEFT JOIN</span> (
+    <span class="code-kw">SELECT</span> InvNo, <span class="code-fn">SUM</span>(ISNULL(SetAmt, 0)) <span class="code-kw">AS</span> AppSettled 
+    <span class="code-kw">FROM</span> dbo.AppInvoice 
+    <span class="code-kw">WHERE</span> InvNo &gt; 0
+    <span class="code-kw">GROUP BY</span> InvNo
+) app <span class="code-kw">ON</span> i.InvNo = app.InvNo
+<span class="code-kw">WHERE</span> (i.InVal - (ISNULL(i.SetAmt, 0) + ISNULL(app.AppSettled, 0))) &gt; 0.01;
+  </div>
+
+  <!-- Document Footer -->
+  <div class="footer">
+    <div>JayPharma Field Automation Suite &copy; 2026 Ceylon Innovation (Pvt) Ltd</div>
+    <div>Support & Verification Hotline: 0114 758 900 • Web: ceyloninnovation.com</div>
+  </div>
+
+</body>
+</html>
+
