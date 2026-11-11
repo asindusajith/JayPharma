@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -534,8 +535,8 @@ class ReceiptPrinterService {
     return pdf.save();
   }
 
-  /// Triggers direct Bluetooth thermal printing, or falls back to system print dialog
-  static Future<void> printReceiptDirect(
+  /// Triggers direct Bluetooth thermal printing, or falls back to system print dialog only on Web
+  static Future<bool> printReceiptDirect(
     Receipt receipt, {
     bool isReprint = false,
     ReceiptCopyMode copyMode = ReceiptCopyMode.all,
@@ -547,15 +548,20 @@ class ReceiptPrinterService {
         isReprint: isReprint,
         copyMode: copyMode,
       );
-      if (success) return;
+      if (success) return true;
     } catch (_) {}
 
-    // Fall back to system PDF dialog only if Bluetooth print was not available
-    final pdfBytes = await generateReceiptPdf(receipt, isReprint: isReprint, copyMode: copyMode);
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdfBytes,
-      name: 'JayPharma_Receipt_${receipt.manualReceiptNo}',
-    );
+    // Fall back to browser PDF print dialog ONLY on Web! Never on mobile POS!
+    if (kIsWeb) {
+      final pdfBytes = await generateReceiptPdf(receipt, isReprint: isReprint, copyMode: copyMode);
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdfBytes,
+        name: 'JayPharma_Receipt_${receipt.manualReceiptNo}',
+      );
+      return true;
+    }
+
+    return false;
   }
 
   /// Triggers printing of Day-End Summary Statement

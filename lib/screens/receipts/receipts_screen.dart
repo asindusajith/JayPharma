@@ -838,17 +838,21 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                 );
 
                 // Trigger print with duplicate watermark and selected copy mode
-                await ReceiptPrinterService.printReceiptDirect(r, isReprint: true, copyMode: copyMode);
+                final printed = await ReceiptPrinterService.printReceiptDirect(r, isReprint: true, copyMode: copyMode);
 
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        isSi
-                            ? 'අංක #${r.manualReceiptNo} රිසිට්පත සාර්ථකව නැවත මුද්‍රණය කරන ලදී.'
-                            : 'Receipt #${r.manualReceiptNo} reprinted and logged to audit trail.',
+                        printed
+                            ? (isSi
+                                ? 'අංක #${r.manualReceiptNo} රිසිට්පත සාර්ථකව නැවත මුද්‍රණය කරන ලදී.'
+                                : 'Receipt #${r.manualReceiptNo} reprinted and logged to audit trail.')
+                            : (isSi
+                                ? 'මුද්‍රණ යන්ත්‍රය (MTP-3) සම්බන්ධ කරගත නොහැකි විය. කරුණාකර Printer එක On කර ඇත්දැයි බලන්න.'
+                                : 'Could not connect to thermal printer. Please verify printer is ON.'),
                       ),
-                      backgroundColor: AppTheme.successGreen,
+                      backgroundColor: printed ? AppTheme.successGreen : AppTheme.dangerRed,
                     ),
                   );
                 }

@@ -23,13 +23,6 @@ class _ReceiptSuccessScreenState extends State<ReceiptSuccessScreen> {
   bool _isPrinting = false;
   int _selectedCopyTab = 0; // 0: All, 1: Customer Copy, 2: Accounts Copy
 
-  @override
-  void initState() {
-    super.initState();
-    // Auto-connect to saved printer when receipt success screen opens
-    BluetoothPrinterService.autoConnectToSavedPrinter();
-  }
-
   void _printReceipt() async {
     setState(() => _isPrinting = true);
     try {
@@ -46,11 +39,34 @@ class _ReceiptSuccessScreenState extends State<ReceiptSuccessScreen> {
           copyMode = ReceiptCopyMode.all;
           break;
       }
-      await ReceiptPrinterService.printReceiptDirect(widget.receipt, copyMode: copyMode);
+      final success = await ReceiptPrinterService.printReceiptDirect(widget.receipt, copyMode: copyMode);
+      if (!success && mounted) {
+        final lang = Provider.of<AppState>(context, listen: false).currentLanguage;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    lang == 'si'
+                        ? 'බ්ලූටූත් මුද්‍රණ යන්ත්‍රය සම්බන්ධ කරගත නොහැකි විය. කරුණාකර Printer එක On කර ඇත්දැයි බලා නැවත Print ඔබන්න.'
+                        : 'Could not connect to thermal printer. Please verify printer is ON and press Print again.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: AppTheme.dangerRed,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Print dialog error: $e'), backgroundColor: AppTheme.dangerRed),
+          SnackBar(content: Text('Print error: $e'), backgroundColor: AppTheme.dangerRed),
         );
       }
     } finally {
