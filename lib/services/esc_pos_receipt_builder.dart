@@ -5,22 +5,39 @@ import 'package:intl/intl.dart';
 import '../models/receipt.dart';
 
 class EscPosReceiptBuilder {
-  /// Builds complete raw ESC/POS bytes matching the Ceylon Innovation ERP format with Logo
+  /// Builds complete raw ESC/POS bytes matching 80mm thermal receipt specifications
   static Future<List<int>> buildReceiptBytes(Receipt receipt, {bool is80mm = true, bool isReprint = false}) async {
     final profile = await CapabilityProfile.load();
     final paperSize = is80mm ? PaperSize.mm80 : PaperSize.mm58;
     final generator = Generator(paperSize, profile);
     List<int> bytes = [];
 
-    // Pre-load and process logo image on clean white canvas
+    // Pre-load and process logo image: auto-crop transparent padding so text sits snugly below
     img.Image? logoImage;
     try {
       final byteData = await rootBundle.load('assets/images/jay_pharma_shield.png');
       final rawBytes = byteData.buffer.asUint8List();
       final decoded = img.decodeImage(rawBytes);
       if (decoded != null) {
-        final targetWidth = is80mm ? 150 : 120;
-        final resized = img.copyResize(decoded, width: targetWidth);
+        int minX = decoded.width, maxX = 0, minY = decoded.height, maxY = 0;
+        for (int y = 0; y < decoded.height; y++) {
+          for (int x = 0; x < decoded.width; x++) {
+            final pixel = decoded.getPixel(x, y);
+            if (pixel.a > 15) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+        img.Image cropped = decoded;
+        if (maxX > minX && maxY > minY) {
+          cropped = img.copyCrop(decoded, x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1);
+        }
+
+        final targetWidth = is80mm ? 130 : 100;
+        final resized = img.copyResize(cropped, width: targetWidth);
         final canvas = img.Image(width: resized.width, height: resized.height, numChannels: 4);
         img.fill(canvas, color: img.ColorRgba8(255, 255, 255, 255));
         img.compositeImage(canvas, resized);
@@ -29,21 +46,22 @@ class EscPosReceiptBuilder {
     } catch (_) {}
 
     // 1. Copy 1: Customer Copy
-    bytes += _buildSingleCopy(generator, receipt, 'CUSTOMER COPY', logoImage: logoImage, isReprint: isReprint);
+    bytes += _buildSingleCopy(generator, receipt, 'CUSTOMER COPY', logoImage: logoImage, is80mm: is80mm, isReprint: isReprint);
 
-    // 2. Cut Here Divider
+    // 2. Cut Here Divider with proper spacing
     bytes += generator.feed(1);
     bytes += generator.hr(ch: '-');
-    bytes += generator.text('- - - - - - - - - CUT HERE - - - - - - - - -', styles: const PosStyles(align: PosAlign.center, bold: true));
+    bytes += generator.text('- - - - - - - - - CUT HERE - - - - - - - - -', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.hr(ch: '-');
     bytes += generator.feed(1);
 
     // 3. Copy 2: Accounts Copy
-    bytes += _buildSingleCopy(generator, receipt, 'ACCOUNTS COPY', logoImage: logoImage, isReprint: isReprint);
+    bytes += _buildSingleCopy(generator, receipt, 'ACCOUNTS COPY', logoImage: logoImage, is80mm: is80mm, isReprint: isReprint);
 
-    // Final feed and paper cut
-    bytes += generator.feed(3);
-    bytes += generator.cut();
+    // Final feed and paper cut: direct ESC/POS cut without generator.cut()'s 5 empty lines
+    bytes += generator.feed(1);
+    // ESC/POS GS V 1 (partial cut directly at current position)
+    bytes += [0x1d, 0x56, 0x01];
 
     return bytes;
   }
@@ -53,6 +71,7 @@ class EscPosReceiptBuilder {
     Receipt receipt,
     String copyTitle, {
     img.Image? logoImage,
+    bool is80mm = true,
     bool isReprint = false,
   }) {
     List<int> bytes = [];
@@ -68,50 +87,61 @@ class EscPosReceiptBuilder {
     // 1. Graphic Logo
     if (logoImage != null) {
       bytes += generator.image(logoImage, align: PosAlign.center);
-      bytes += generator.feed(1);
+      // Reduce line spacing to 8 dots to pull the company title snugly up to the logo tip
+      bytes += [27, 51, 8];
     }
 
-    // 2. Header (Matching ERP Style in Suwa Piyasa Cafe)
+    // 2. Header (Positioned higher, small gap directly below the logo)
     bytes += generator.text(
       'JAY PHARMA (PVT) LTD',
-      styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size1, width: PosTextSize.size1),
+      styles: const PosStyles(
+        align: PosAlign.center,
+        bold: true,
+        height: PosTextSize.size1,
+        width: PosTextSize.size1,
+      ),
     );
+    // Reset standard line spacing
+    bytes += [27, 50];
+
     bytes += generator.text('No. 123, Main Street, Colombo 07', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text('Tel: 011 234 5678 | info@jaypharma.lk', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text('VAT No: 123456789-7000', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.hr(ch: '-');
 
-    // 3. Copy Title & Document Title
+    // 3. Copy Title & Document Title (Centered, clean)
     bytes += generator.text(copyTitle, styles: const PosStyles(align: PosAlign.center, bold: true));
-    bytes += generator.text('OFFICIAL RECEIPT', styles: const PosStyles(align: PosAlign.center, bold: true));
+    bytes += generator.text('OFFICIAL RECEIPT', styles: const PosStyles(align: PosAlign.center));
     if (isReprint || receipt.reprintCount > 0) {
-      bytes += generator.text('DUPLICATE COPY (REPRINT)', styles: const PosStyles(align: PosAlign.center, bold: true));
+      bytes += generator.text('DUPLICATE COPY (REPRINT)', styles: const PosStyles(align: PosAlign.center));
     }
     bytes += generator.hr(ch: '-');
 
-    // 4. Metadata (Clean full-width layout matching Ceylon Innovation ERP)
-    bytes += generator.text('Receipt No : ${receipt.manualReceiptNo}', styles: const PosStyles(bold: true));
-    bytes += generator.text('Order Date/Time: ${dateTimeFormat.format(receipt.createdAt)}');
-    bytes += generator.text('Customer   : ${receipt.customerCode} - ${receipt.customerName}', styles: const PosStyles(bold: true));
+    // 4. Metadata (Clean 18-char colon alignment with indented word-wrapping)
+    bytes += generator.text('Receipt No      : ${receipt.manualReceiptNo}');
+    bytes += generator.text('Order Date/Time : ${dateTimeFormat.format(receipt.createdAt)}');
+    bytes += generator.text('Customer        : ${receipt.customerCode}');
+    // Indent customer name under the value of the colon (18 spaces) so it never wraps awkwardly
+    bytes += generator.text('                  ${receipt.customerName}');
     if (receipt.customerAddress.trim().isNotEmpty) {
-      bytes += generator.text('Address    : ${receipt.customerAddress.trim()}');
+      bytes += generator.text('Address         : ${receipt.customerAddress.trim()}');
     }
-    bytes += generator.text('Payment    : ${receipt.paymentMethodDisplay.toUpperCase()}', styles: const PosStyles(bold: true));
+    bytes += generator.text('Payment         : ${receipt.paymentMethodDisplay.toUpperCase()}');
     if (receipt.paymentMethod == PaymentMethod.cheque) {
-      bytes += generator.text('Cheque No  : ${receipt.chequeNumber ?? ""}');
+      bytes += generator.text('Cheque No       : ${receipt.chequeNumber ?? ""}');
       if (receipt.chequeDate != null) {
-        bytes += generator.text('Chq Date   : ${dateFormat.format(receipt.chequeDate!)}');
+        bytes += generator.text('Chq Date        : ${dateFormat.format(receipt.chequeDate!)}');
       }
-      bytes += generator.text('Bank/Branch: ${receipt.bank ?? ""} (${receipt.branch ?? ""})');
+      bytes += generator.text('Bank/Branch     : ${receipt.bank ?? ""} (${receipt.branch ?? ""})');
     }
-    bytes += generator.text('Collector  : ${receipt.collectorName} (${receipt.collectorId})');
+    bytes += generator.text('Collector       : ${receipt.collectorName} (${receipt.collectorId})');
     bytes += generator.hr(ch: '-');
 
-    // 5. Invoices Table Header (Matching Description & Price, Qty, Total layout)
+    // 5. Invoices Table Header (80mm safe column allocation: 6 + 3 + 3 = 12 columns)
     bytes += generator.row([
-      PosColumn(text: 'Description & Price', width: 6, styles: const PosStyles(bold: true)),
-      PosColumn(text: 'Inv Amt', width: 3, styles: const PosStyles(align: PosAlign.right, bold: true)),
-      PosColumn(text: 'Settled', width: 3, styles: const PosStyles(align: PosAlign.right, bold: true)),
+      PosColumn(text: 'Description & Price', width: 6),
+      PosColumn(text: 'Inv Amt', width: 3, styles: const PosStyles(align: PosAlign.right)),
+      PosColumn(text: 'Settled', width: 3, styles: const PosStyles(align: PosAlign.right)),
     ]);
     bytes += generator.hr(ch: '-');
 
@@ -120,40 +150,40 @@ class EscPosReceiptBuilder {
       bytes += generator.row([
         PosColumn(text: 'Advance Payment', width: 6),
         PosColumn(text: '0.00', width: 3, styles: const PosStyles(align: PosAlign.right)),
-        PosColumn(text: currency.format(receipt.totalAmount), width: 3, styles: const PosStyles(align: PosAlign.right, bold: true)),
+        PosColumn(text: currency.format(receipt.totalAmount), width: 3, styles: const PosStyles(align: PosAlign.right)),
       ]);
     } else {
       for (final inv in receipt.allocatedInvoices) {
         // Line 1: Invoice number and date
-        bytes += generator.text('#${inv.invoiceNo} (${dateFormat.format(inv.invoiceDate)})', styles: const PosStyles(bold: true));
-        // Line 2: Balance remaining on left, amounts on right
+        bytes += generator.text('#${inv.invoiceNo} (${dateFormat.format(inv.invoiceDate)})');
+        // Line 2: Balance on left, Inv Amt & Settled on right (fits 80mm without any line wrap)
         final balStr = inv.remainingBalance > 0.01 ? ' Bal: ${currency.format(inv.remainingBalance)}' : ' Settled';
         bytes += generator.row([
           PosColumn(text: balStr, width: 6),
           PosColumn(text: currency.format(inv.invoiceAmount), width: 3, styles: const PosStyles(align: PosAlign.right)),
-          PosColumn(text: currency.format(inv.amountSettled), width: 3, styles: const PosStyles(align: PosAlign.right, bold: true)),
+          PosColumn(text: currency.format(inv.amountSettled), width: 3, styles: const PosStyles(align: PosAlign.right)),
         ]);
       }
       if (unallocatedAdvance > 0.01) {
         bytes += generator.row([
           PosColumn(text: 'Advance Credit', width: 6),
           PosColumn(text: '0.00', width: 3, styles: const PosStyles(align: PosAlign.right)),
-          PosColumn(text: currency.format(unallocatedAdvance), width: 3, styles: const PosStyles(align: PosAlign.right, bold: true)),
+          PosColumn(text: currency.format(unallocatedAdvance), width: 3, styles: const PosStyles(align: PosAlign.right)),
         ]);
       }
     }
     bytes += generator.hr(ch: '-');
 
-    // 6. Totals (Sub Total & GrandTotal double-height bold matching Image 2!)
+    // 6. Totals Section (Cleanly bordered & orderly)
     if (receipt.allocatedInvoices.isNotEmpty) {
       bytes += generator.row([
-        PosColumn(text: 'Sub Total :', width: 6),
+        PosColumn(text: 'Sub Total(LKR)   :', width: 6),
         PosColumn(text: currency.format(totalInvoiced), width: 6, styles: const PosStyles(align: PosAlign.right)),
       ]);
     }
     bytes += generator.row([
       PosColumn(
-        text: 'GrandTotal:',
+        text: 'GrandTotal(LKR)  :',
         width: 6,
         styles: const PosStyles(bold: true, height: PosTextSize.size1),
       ),
@@ -163,12 +193,13 @@ class EscPosReceiptBuilder {
         styles: const PosStyles(align: PosAlign.right, bold: true, height: PosTextSize.size1),
       ),
     ]);
+    bytes += generator.hr(ch: '-');
 
-    // 7. Payments Section (Matching ********* Payments ********* in Image 2)
-    bytes += generator.text('********* Payments *********', styles: const PosStyles(align: PosAlign.center, bold: true));
+    // 7. Payments Section (Properly framed and spaced)
+    bytes += generator.text('********* Payments *********', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.row([
       PosColumn(text: '${receipt.paymentMethodDisplay.toUpperCase()}(LKR):', width: 6),
-      PosColumn(text: currency.format(receipt.totalAmount), width: 6, styles: const PosStyles(align: PosAlign.right, bold: true)),
+      PosColumn(text: currency.format(receipt.totalAmount), width: 6, styles: const PosStyles(align: PosAlign.right)),
     ]);
     if (receipt.comments.trim().isNotEmpty) {
       bytes += generator.text('Remarks: ${receipt.comments.trim()}');
@@ -176,55 +207,43 @@ class EscPosReceiptBuilder {
 
     // 8. Outstanding Balance Section
     if (receipt.allocatedInvoices.isNotEmpty && totalBalance > 0.01) {
-      bytes += generator.text('********* Outstanding *********', styles: const PosStyles(align: PosAlign.center, bold: true));
+      bytes += generator.feed(1);
+      bytes += generator.text('********* Outstanding *********', styles: const PosStyles(align: PosAlign.center));
       bytes += generator.row([
-        PosColumn(text: 'Remaining Balance:', width: 6, styles: const PosStyles(bold: true)),
-        PosColumn(text: currency.format(totalBalance), width: 6, styles: const PosStyles(align: PosAlign.right, bold: true)),
+        PosColumn(text: 'Remaining Balance:', width: 6),
+        PosColumn(text: currency.format(totalBalance), width: 6, styles: const PosStyles(align: PosAlign.right)),
       ]);
     }
     bytes += generator.hr(ch: '-');
 
-    // 9. Order / Receipt Number Highlight (Matching Image 2: -Order Number- 1031)
-    bytes += generator.feed(1);
-    bytes += generator.text('- Receipt Number -', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.text(
-      receipt.manualReceiptNo,
-      styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size1, width: PosTextSize.size1),
-    );
-    bytes += generator.feed(1);
-
-    // 10. Customer Stamp Box & Signatures (Clean centered, non-wrapping layout)
-    bytes += generator.text('+--------------------------+', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.text('|                          |', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.text('|      CUSTOMER SEAL       |', styles: const PosStyles(align: PosAlign.center, bold: true));
-    bytes += generator.text('|       (STAMP HERE)       |', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.text('|                          |', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.text('+--------------------------+', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.feed(1);
+    // 9. Customer Stamp Space & Signatures
+    // 6 blank lines for physical rubber seal stamp (as requested by user):
+    bytes += generator.feed(6);
 
     bytes += generator.row([
       PosColumn(text: '..................', width: 6, styles: const PosStyles(align: PosAlign.center)),
       PosColumn(text: '..................', width: 6, styles: const PosStyles(align: PosAlign.center)),
     ]);
     bytes += generator.row([
-      PosColumn(text: 'Collector Signature', width: 6, styles: const PosStyles(align: PosAlign.center, bold: true)),
-      PosColumn(text: 'Customer Signature', width: 6, styles: const PosStyles(align: PosAlign.center, bold: true)),
+      PosColumn(text: 'Collector Signature', width: 6, styles: const PosStyles(align: PosAlign.center)),
+      PosColumn(text: 'Customer Signature', width: 6, styles: const PosStyles(align: PosAlign.center)),
     ]);
     bytes += generator.row([
       PosColumn(text: '(${receipt.collectorName})', width: 6, styles: const PosStyles(align: PosAlign.center)),
       PosColumn(text: '(Authorized Sign)', width: 6, styles: const PosStyles(align: PosAlign.center)),
     ]);
+
+    // Small gap before Footer
     bytes += generator.feed(1);
 
-    // 11. Footer (Exact match to Ceylon Innovation ERP in Image 2)
-    bytes += generator.text('Thank You, Come Again !!!', styles: const PosStyles(align: PosAlign.center, bold: true));
-    bytes += generator.text('Developed By CeylonInnovation.com', styles: const PosStyles(align: PosAlign.center, bold: true));
+    // 10. Footer (Ceylon Innovation Hotline - 'Thank You, Come Again !!!' removed as requested)
+    bytes += generator.text('Developed By CeylonInnovation.com', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text('Hotline 0114 758 900', styles: const PosStyles(align: PosAlign.center));
 
     return bytes;
   }
 
-  /// Builds a quick Test Print slip matching the Suwa Piyasa / Z-Report ERP format
+  /// Builds a quick Test Print slip matching 80mm format
   static Future<List<int>> buildTestPrintBytes({bool is80mm = true}) async {
     final profile = await CapabilityProfile.load();
     final paperSize = is80mm ? PaperSize.mm80 : PaperSize.mm58;
@@ -238,8 +257,25 @@ class EscPosReceiptBuilder {
       final rawBytes = byteData.buffer.asUint8List();
       final decoded = img.decodeImage(rawBytes);
       if (decoded != null) {
-        final targetWidth = is80mm ? 150 : 120;
-        final resized = img.copyResize(decoded, width: targetWidth);
+        int minX = decoded.width, maxX = 0, minY = decoded.height, maxY = 0;
+        for (int y = 0; y < decoded.height; y++) {
+          for (int x = 0; x < decoded.width; x++) {
+            final pixel = decoded.getPixel(x, y);
+            if (pixel.a > 15) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+        img.Image cropped = decoded;
+        if (maxX > minX && maxY > minY) {
+          cropped = img.copyCrop(decoded, x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1);
+        }
+
+        final targetWidth = is80mm ? 130 : 100;
+        final resized = img.copyResize(cropped, width: targetWidth);
         final canvas = img.Image(width: resized.width, height: resized.height, numChannels: 4);
         img.fill(canvas, color: img.ColorRgba8(255, 255, 255, 255));
         img.compositeImage(canvas, resized);
@@ -249,26 +285,28 @@ class EscPosReceiptBuilder {
 
     if (logoImage != null) {
       bytes += generator.image(logoImage, align: PosAlign.center);
-      bytes += generator.feed(1);
+      bytes += [27, 51, 8];
     }
 
     bytes += generator.text(
       'JAY PHARMA (PVT) LTD',
       styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size1, width: PosTextSize.size1),
     );
-    bytes += generator.text('BLUETOOTH THERMAL PRINTER TEST', styles: const PosStyles(align: PosAlign.center, bold: true));
+    bytes += [27, 50];
+
+    bytes += generator.text('BLUETOOTH THERMAL PRINTER TEST', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.hr(ch: '-');
-    bytes += generator.text('Status      : CONNECTED OK', styles: const PosStyles(bold: true));
+    bytes += generator.text('Status      : CONNECTED OK');
     bytes += generator.text('Paper Width : ${is80mm ? "80mm POS Thermal" : "58mm Portable"}');
     bytes += generator.text('Date & Time : ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}');
     bytes += generator.hr(ch: '-');
-    bytes += generator.text('*** TEST PRINT SUCCESSFUL ***', styles: const PosStyles(align: PosAlign.center, bold: true));
+    bytes += generator.text('*** TEST PRINT SUCCESSFUL ***', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text('Ready to print receipts with official logo.', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.feed(1);
-    bytes += generator.text('Developed By CeylonInnovation.com', styles: const PosStyles(align: PosAlign.center, bold: true));
+    bytes += generator.text('Developed By CeylonInnovation.com', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text('Hotline 0114 758 900', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.feed(3);
-    bytes += generator.cut();
+    bytes += generator.feed(1);
+    bytes += [0x1d, 0x56, 0x01];
 
     return bytes;
   }

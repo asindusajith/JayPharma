@@ -302,30 +302,15 @@ class ReceiptPrinterService {
                 ],
               ),
 
-              // Customer Signature & Official Stamp Box
+              // Customer Signature & Stamp Space (Box removed, blank space preserved)
               pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
                 children: [
-                  pw.Container(
-                    width: 95,
-                    height: 38,
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(color: PdfColors.grey500, width: 0.6),
-                      borderRadius: const pw.BorderRadius.all(pw.Radius.circular(2)),
-                    ),
-                    child: pw.Center(
-                      child: pw.Text(
-                        '[ CUSTOMER SEAL\n/ STAMP HERE ]',
-                        textAlign: pw.TextAlign.center,
-                        style: const pw.TextStyle(fontSize: 5.5, color: PdfColors.grey600),
-                      ),
-                    ),
-                  ),
-                  pw.SizedBox(height: 2),
+                  pw.SizedBox(height: 55),
                   pw.Container(width: 95, height: 0.6, color: PdfColors.black),
                   pw.SizedBox(height: 1),
-                  pw.Text('Customer Signature', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('(Authorized Seal & Sign)', style: const pw.TextStyle(fontSize: 5.5, color: PdfColors.grey700)),
+                  pw.Text('Customer Signature', style: const pw.TextStyle(fontSize: 7)),
+                  pw.Text('(Authorized Sign)', style: const pw.TextStyle(fontSize: 5.5, color: PdfColors.grey700)),
                 ],
               ),
             ],
@@ -337,11 +322,6 @@ class ReceiptPrinterService {
           pw.Center(
             child: pw.Column(
               children: [
-                pw.Text(
-                  'Thank You, Come Again !!!',
-                  style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
-                ),
-                pw.SizedBox(height: 2),
                 pw.Text(
                   'Developed By Ceyloninnovation.com',
                   style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: PdfColors.grey800),

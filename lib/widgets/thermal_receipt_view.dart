@@ -456,38 +456,20 @@ class _ThermalReceiptViewState extends State<ThermalReceiptView> {
             ),
             const SizedBox(width: 12),
 
-            // Right: Customer Signature & Stamp Box
+            // Right: Customer Signature & Stamp Space (Box removed, open space preserved)
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Container(
-                    height: 44,
-                    width: 130,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFF94A3B8), style: BorderStyle.solid, width: 1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Center(
-                      child: Text(
-                        '[ CUSTOMER SEAL\n/ STAMP HERE ]',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.inter(
-                          fontSize: 7.5,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF94A3B8),
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                  ),
+                  const SizedBox(height: 64),
+                  Container(width: 120, height: 1, color: const Color(0xFF1E293B)),
                   const SizedBox(height: 4),
                   Text(
                     'Customer Signature',
-                    style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.w600, color: const Color(0xFF0F172A)),
+                    style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.w500, color: const Color(0xFF0F172A)),
                   ),
                   Text(
-                    '(Authorized Seal & Sign)',
+                    '(Authorized Sign)',
                     style: GoogleFonts.inter(fontSize: 7.5, color: const Color(0xFF64748B)),
                   ),
                 ],
@@ -501,11 +483,6 @@ class _ThermalReceiptViewState extends State<ThermalReceiptView> {
         Center(
           child: Column(
             children: [
-              Text(
-                'Thank You, Come Again !!!',
-                style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B)),
-              ),
-              const SizedBox(height: 2),
               Text(
                 'Developed By Ceyloninnovation.com',
                 style: GoogleFonts.inter(fontSize: 8.5, fontWeight: FontWeight.bold, color: const Color(0xFF475569)),
