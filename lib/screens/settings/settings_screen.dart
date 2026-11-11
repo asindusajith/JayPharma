@@ -1018,7 +1018,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                                   ),
                                   Text(
-                                    'Installed: v1.0.3 (Build 4) • Direct ESC/POS',
+                                    'Installed: v1.0.4 (Build 5) • Direct Bluetooth ESC/POS',
                                     style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
                                   ),
                                 ],
@@ -1029,8 +1029,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 12),
                         Text(
                           lang == 'si'
-                              ? 'Git push කළ පසු නවතම APK එක GitHub මඟින් ස්වයංක්‍රීයව Build වේ. පහත බටනය මඟින් නවතම APK එක ඕනෑම වේලාවක බාගත කර ස්ථාපනය කළ හැක.'
-                              : 'Whenever code is pushed to GitHub, the latest release APK is automatically compiled in the cloud. Tap below to download the latest APK update.',
+                              ? 'Git push කළ පසු නවතම APK එක GitHub මඟින් ස්වයංක්‍රීයව Build වේ. පහත බටනය මඟින් නවතම APK එක (JayPharma-v1.0.4-release.apk) ඕනෑම වේලාවක බාගත කර ස්ථාපනය කළ හැක.'
+                              : 'Whenever code is pushed to GitHub, the latest release APK is automatically compiled in the cloud. Tap below to download the latest JayPharma-v1.0.4-release.apk.',
                           style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textDark, height: 1.4),
                         ),
                         const SizedBox(height: 12),
@@ -1039,7 +1039,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: ElevatedButton.icon(
                             icon: const Icon(Icons.download_rounded, size: 18),
                             label: Text(
-                              lang == 'si' ? 'නවතම APK එක බාගත කරන්න (Download Latest)' : 'Download Latest APK Update',
+                              lang == 'si' ? 'නවතම APK එක බාගත කරන්න (v1.0.4 Build 5)' : 'Download Latest APK (v1.0.4 Build 5)',
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                             ),
                             style: ElevatedButton.styleFrom(
@@ -1049,26 +1049,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             onPressed: () async {
-                              final githubUrl = 'https://github.com/asindusajith/JayPharma/releases/download/latest/app-release.apk';
+                              final githubUrl = 'https://github.com/asindusajith/JayPharma/releases/download/latest/JayPharma-v1.0.4-release.apk';
+                              final fallbackGithubUrl = 'https://github.com/asindusajith/JayPharma/releases/download/latest/app-release.apk';
                               final localWifiUrl = 'http://192.168.1.18:8090/JayPharma-release.apk';
                               final serverApkUrl = '${appState.apiBaseUrl}/app/download-apk';
                               try {
                                 final uri = Uri.parse(githubUrl);
                                 final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
                                 if (!launched) {
-                                  await launchUrl(Uri.parse(localWifiUrl), mode: LaunchMode.externalApplication);
+                                  final fLaunched = await launchUrl(Uri.parse(fallbackGithubUrl), mode: LaunchMode.externalApplication);
+                                  if (!fLaunched) {
+                                    await launchUrl(Uri.parse(localWifiUrl), mode: LaunchMode.externalApplication);
+                                  }
                                 }
                               } catch (e) {
                                 try {
-                                  await launchUrl(Uri.parse(localWifiUrl), mode: LaunchMode.externalApplication);
+                                  await launchUrl(Uri.parse(fallbackGithubUrl), mode: LaunchMode.externalApplication);
                                 } catch (_) {
                                   try {
-                                    await launchUrl(Uri.parse(serverApkUrl), mode: LaunchMode.externalApplication);
-                                  } catch (e2) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Could not open download link: $e2')),
-                                      );
+                                    await launchUrl(Uri.parse(localWifiUrl), mode: LaunchMode.externalApplication);
+                                  } catch (_) {
+                                    try {
+                                      await launchUrl(Uri.parse(serverApkUrl), mode: LaunchMode.externalApplication);
+                                    } catch (e2) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('Could not open download link: $e2')),
+                                        );
+                                      }
                                     }
                                   }
                                 }

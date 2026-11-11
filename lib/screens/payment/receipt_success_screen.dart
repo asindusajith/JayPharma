@@ -23,7 +23,15 @@ class _ReceiptSuccessScreenState extends State<ReceiptSuccessScreen> {
   bool _isPrinting = false;
   int _selectedCopyTab = 0; // 0: All, 1: Customer Copy, 2: Accounts Copy
 
+  @override
+  void initState() {
+    super.initState();
+    // Proactively connect to saved thermal printer in background
+    BluetoothPrinterService.autoConnectToSavedPrinter();
+  }
+
   void _printReceipt() async {
+    if (_isPrinting) return;
     setState(() => _isPrinting = true);
     try {
       ReceiptCopyMode copyMode;
