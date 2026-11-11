@@ -34,32 +34,35 @@ jobs:
         run: flutter pub get
 
       - name: Build Release APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/JayPharma-v1.0.3-release.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/JayPharma-v1.0.3-release.apk
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         if: success()
         with:
           tag_name: latest
-          name: "JayPharma Latest APK Release"
+          name: "JayPharma v1.0.3 (Build 4) - Direct Bluetooth Thermal Release"
           body: |
-            ### JayPharma Mobile Application - Latest Release
+            ### JayPharma Mobile Application - v1.0.3 (Build 4)
+            - Native RFCOMM Bluetooth Hardware Engine with Channel 1 fallback
+            - Auto-connect and remember MTP-3_5F22 thermal printer permanently
+            - System PDF print dialog disabled on mobile (Direct ESC/POS receipt printing)
             - Automated cloud build generated from commit `${{ github.sha }}`
-            - Includes:
-              - Day-End Freeze & Day-Start with Management OTP & Liquid Glass UI
-              - Dynamic Receipt Number Prefix (User ID / Code)
-              - Collector-scoped invoices & Day-End summaries
-              - Realtime SQL Server Sync
             
-            **Direct Download Link**:
-            [Download app-release.apk](https://github.com/${{ github.repository }}/releases/download/latest/app-release.apk)
-          files: build/app/outputs/flutter-apk/app-release.apk
+            **Direct Download Links**:
+            - [Download JayPharma-v1.0.3-release.apk](https://github.com/${{ github.repository }}/releases/download/latest/JayPharma-v1.0.3-release.apk)
+            - [Download app-release.apk](https://github.com/${{ github.repository }}/releases/download/latest/app-release.apk)
+          files: |
+            build/app/outputs/flutter-apk/JayPharma-v1.0.3-release.apk
+            build/app/outputs/flutter-apk/app-release.apk
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

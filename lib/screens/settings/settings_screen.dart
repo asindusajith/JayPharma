@@ -1018,7 +1018,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                                   ),
                                   Text(
-                                    'Installed: v1.0.2 (Build 3) • GitHub Auto CI/CD',
+                                    'Installed: v1.0.3 (Build 4) • Direct ESC/POS',
                                     style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
                                   ),
                                 ],
