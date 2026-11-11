@@ -188,74 +188,65 @@ class _ThermalReceiptViewState extends State<ThermalReceiptView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Top Header
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const JayPharmaLogo(size: 38, showText: false),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'JAY PHARMA (PVT) LTD',
-                    style: GoogleFonts.outfit(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFF0F1E36),
-                    ),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    'No. 123, Main Street, Colombo 07, Sri Lanka\nTel: 011 234 5678 | Email: info@jaypharma.lk\nVAT No: 123456789-7000',
+        // Top Header (Centered Logo & Company Details matching ERP)
+        Center(
+          child: Column(
+            children: [
+              const JayPharmaLogo(size: 42, showText: false),
+              const SizedBox(height: 6),
+              Text(
+                'JAY PHARMA (PVT) LTD',
+                style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF0F1E36),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'No. 123, Main Street, Colombo 07, Sri Lanka\nTel: 011 234 5678 | Email: info@jaypharma.lk\nVAT No: 123456789-7000',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 8.5,
+                  color: const Color(0xFF475569),
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Divider(color: Color(0xFF94A3B8), thickness: 1),
+              Text(
+                copyTitle,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF0F172A),
+                  letterSpacing: 0.5,
+                ),
+              ),
+              Text(
+                'OFFICIAL RECEIPT',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF475569),
+                ),
+              ),
+              if (isReprint || receipt.reprintCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    '*** DUPLICATE (REPRINT) ***',
                     style: GoogleFonts.inter(
-                      fontSize: 8.5,
-                      color: const Color(0xFF475569),
-                      height: 1.3,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFFDC2626),
                     ),
                   ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        // Copy Title Banner
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            if (isReprint || receipt.reprintCount > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEE2E2),
-                  borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text(
-                  'DUPLICATE COPY',
-                  style: GoogleFonts.inter(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: const Color(0xFFB91C1C),
-                  ),
-                ),
-              )
-            else
-              const SizedBox(),
-            Text(
-              copyTitle,
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: const Color(0xFF0F172A),
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+              const Divider(color: Color(0xFF94A3B8), thickness: 1),
+            ],
+          ),
         ),
-        const Divider(color: Color(0xFF94A3B8), thickness: 1.2, height: 16),
 
         // RECEIPT No. and Date
         Row(
@@ -510,6 +501,11 @@ class _ThermalReceiptViewState extends State<ThermalReceiptView> {
         Center(
           child: Column(
             children: [
+              Text(
+                'Thank You, Come Again !!!',
+                style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B)),
+              ),
+              const SizedBox(height: 2),
               Text(
                 'Developed By Ceyloninnovation.com',
                 style: GoogleFonts.inter(fontSize: 8.5, fontWeight: FontWeight.bold, color: const Color(0xFF475569)),

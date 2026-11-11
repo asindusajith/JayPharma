@@ -338,6 +338,11 @@ class ReceiptPrinterService {
             child: pw.Column(
               children: [
                 pw.Text(
+                  'Thank You, Come Again !!!',
+                  style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
+                ),
+                pw.SizedBox(height: 2),
+                pw.Text(
                   'Developed By Ceyloninnovation.com',
                   style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: PdfColors.grey800),
                 ),
