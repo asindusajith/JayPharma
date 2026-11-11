@@ -4,6 +4,9 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
+import java.io.OutputStream
+import java.util.UUID
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -239,6 +242,115 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         result.success(false)
                     }
+                }
+                "printRawBytes" -> {
+                    val addr = call.argument<String>("address")
+                    val bytes = call.argument<ByteArray>("bytes")
+                    if (bytes == null || bytes.isEmpty()) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+
+                    Thread {
+                        var success = false
+                        var socket: BluetoothSocket? = null
+                        try {
+                            val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                            val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                            if (adapter == null || !adapter.isEnabled) {
+                                runOnUiThread { result.success(false) }
+                                return@Thread
+                            }
+
+                            var targetAddress = addr
+                            if (targetAddress.isNullOrBlank()) {
+                                val bonded = adapter.bondedDevices
+                                val printer = bonded?.firstOrNull { dev ->
+                                    val n = (dev.name ?: "").uppercase()
+                                    n.contains("MTP") || n.contains("POS") || n.contains("RPP") || n.contains("PRINT") || n.contains("THERMAL")
+                                } ?: bonded?.firstOrNull()
+                                targetAddress = printer?.address
+                            }
+
+                            if (targetAddress.isNullOrBlank()) {
+                                runOnUiThread { result.success(false) }
+                                return@Thread
+                            }
+
+                            val device = adapter.getRemoteDevice(targetAddress)
+                            try { adapter.cancelDiscovery() } catch (_: Exception) {}
+
+                            val sppUuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+                            try {
+                                socket = device.createRfcommSocketToServiceRecord(sppUuid)
+                                socket.connect()
+                            } catch (e1: Exception) {
+                                try {
+                                    val m = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                                    socket = m.invoke(device, 1) as BluetoothSocket
+                                    socket.connect()
+                                } catch (e2: Exception) {
+                                    socket = null
+                                }
+                            }
+
+                            if (socket != null && socket.isConnected) {
+                                val out = socket.outputStream
+                                out.write(bytes)
+                                out.flush()
+                                Thread.sleep(250)
+                                socket.close()
+                                success = true
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("JayPharmaBT", "printRawBytes error: ${e.message}")
+                            try { socket?.close() } catch (_: Exception) {}
+                            success = false
+                        }
+                        runOnUiThread { result.success(success) }
+                    }.start()
+                }
+                "testPrinterConnection" -> {
+                    val addr = call.argument<String>("address")
+                    Thread {
+                        var ok = false
+                        var testSocket: BluetoothSocket? = null
+                        try {
+                            val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                            val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                            var target = addr
+                            if (target.isNullOrBlank()) {
+                                val bonded = adapter?.bondedDevices
+                                val printer = bonded?.firstOrNull { dev ->
+                                    val n = (dev.name ?: "").uppercase()
+                                    n.contains("MTP") || n.contains("POS") || n.contains("RPP") || n.contains("PRINT") || n.contains("THERMAL")
+                                } ?: bonded?.firstOrNull()
+                                target = printer?.address
+                            }
+                            if (!target.isNullOrBlank() && adapter?.isEnabled == true) {
+                                val dev = adapter.getRemoteDevice(target)
+                                adapter.cancelDiscovery()
+                                try {
+                                    testSocket = dev.createRfcommSocketToServiceRecord(UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"))
+                                    testSocket.connect()
+                                    ok = testSocket.isConnected
+                                } catch (_: Exception) {
+                                    try {
+                                        val m = dev.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                                        testSocket = m.invoke(dev, 1) as BluetoothSocket
+                                        testSocket.connect()
+                                        ok = testSocket.isConnected
+                                    } catch (_: Exception) {
+                                        ok = false
+                                    }
+                                }
+                                try { testSocket?.close() } catch (_: Exception) {}
+                            }
+                        } catch (_: Exception) {
+                            ok = false
+                        }
+                        runOnUiThread { result.success(ok) }
+                    }.start()
                 }
                 else -> result.notImplemented()
             }

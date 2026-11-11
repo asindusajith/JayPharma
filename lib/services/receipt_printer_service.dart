@@ -534,35 +534,23 @@ class ReceiptPrinterService {
     return pdf.save();
   }
 
-  /// Triggers direct Bluetooth thermal printing if connected, or falls back to system print dialog
+  /// Triggers direct Bluetooth thermal printing, or falls back to system print dialog
   static Future<void> printReceiptDirect(
     Receipt receipt, {
     bool isReprint = false,
     ReceiptCopyMode copyMode = ReceiptCopyMode.all,
   }) async {
     try {
-      final isBtConnected = await BluetoothPrinterService.isConnected();
-      if (isBtConnected) {
-        final success = await BluetoothPrinterService.printReceiptDirect(
-          receipt,
-          isReprint: isReprint,
-          copyMode: copyMode,
-        );
-        if (success) return;
-      } else {
-        // Try auto-connect to saved printer if available before falling back
-        final savedConnected = await BluetoothPrinterService.autoConnectToSavedPrinter();
-        if (savedConnected) {
-          final success = await BluetoothPrinterService.printReceiptDirect(
-            receipt,
-            isReprint: isReprint,
-            copyMode: copyMode,
-          );
-          if (success) return;
-        }
-      }
+      // Direct Bluetooth thermal print (uses native Android RFCOMM on-demand connection)
+      final success = await BluetoothPrinterService.printReceiptDirect(
+        receipt,
+        isReprint: isReprint,
+        copyMode: copyMode,
+      );
+      if (success) return;
     } catch (_) {}
 
+    // Fall back to system PDF dialog only if Bluetooth print was not available
     final pdfBytes = await generateReceiptPdf(receipt, isReprint: isReprint, copyMode: copyMode);
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdfBytes,
