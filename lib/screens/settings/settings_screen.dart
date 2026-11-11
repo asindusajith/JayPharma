@@ -126,13 +126,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _loadBluetoothPrinters() async {
+  Future<void> _loadBluetoothPrinters({bool requestPerm = false}) async {
     setState(() => _isScanningPrinters = true);
     try {
       final isBtOn = await BluetoothPrinterService.isBluetoothEnabled();
       _isBluetoothEnabled = isBtOn;
 
-      final devices = await BluetoothPrinterService.getPairedDevices(requestPerm: true, scanNearby: false);
+      final devices = await BluetoothPrinterService.getPairedDevices(requestPerm: requestPerm, scanNearby: false);
       final saved = await BluetoothPrinterService.getSavedPrinter();
 
       // Ensure saved printer is always in the list so dropdown never loses it
@@ -140,14 +140,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         devices.add(saved);
       }
 
-      BluetoothPrinterDevice? current;
-      if (saved != null) {
+      BluetoothPrinterDevice? current = saved;
+      if (current == null && devices.isNotEmpty) {
         current = devices.firstWhere(
-          (d) => d.address == saved.address,
-          orElse: () => saved,
+          (d) {
+            final n = d.name.toUpperCase();
+            return n.contains('MTP') || n.contains('POS') || n.contains('RPP') || n.contains('PRINT') || n.contains('THERMAL');
+          },
+          orElse: () => devices.first,
         );
-      } else if (devices.isNotEmpty) {
-        current = devices.first;
       }
 
       final isConn = await BluetoothPrinterService.isConnected();
@@ -798,7 +799,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                                   : const Icon(Icons.refresh_rounded, size: 20, color: AppTheme.primaryBlue),
                               tooltip: lang == 'si' ? 'අවසර ලබා ගෙන නැවත සොයන්න (Scan)' : 'Grant Permission & Re-scan',
-                              onPressed: _isScanningPrinters ? null : _loadBluetoothPrinters,
+                              onPressed: _isScanningPrinters ? null : () => _loadBluetoothPrinters(requestPerm: true),
                             ),
                           ],
                         ),

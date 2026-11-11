@@ -23,7 +23,8 @@ class BluetoothPrinterService {
         final bool? nativeHas = await _nativeBtChannel.invokeMethod<bool>('hasBluetoothPermissions');
         if (nativeHas == true) return true;
       }
-      return await PrintBluetoothThermal.isPermissionBluetoothGranted;
+      return await PrintBluetoothThermal.isPermissionBluetoothGranted
+          .timeout(const Duration(milliseconds: 600), onTimeout: () => false);
     } catch (_) {
       return false;
     }
@@ -35,7 +36,8 @@ class BluetoothPrinterService {
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         await _nativeBtChannel.invokeMethod('requestBluetoothPermissions');
       }
-      final granted = await PrintBluetoothThermal.isPermissionBluetoothGranted;
+      final granted = await PrintBluetoothThermal.isPermissionBluetoothGranted
+          .timeout(const Duration(milliseconds: 600), onTimeout: () => false);
       return granted;
     } catch (_) {
       return false;
@@ -118,7 +120,7 @@ class BluetoothPrinterService {
   }
 
   /// Returns list of paired Bluetooth devices on the system
-  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = true, bool scanNearby = false}) async {
+  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = false, bool scanNearby = false}) async {
     try {
       if (requestPerm) {
         await requestPermission();
@@ -126,8 +128,8 @@ class BluetoothPrinterService {
 
       final isConn = await isConnected();
       final prefs = await SharedPreferences.getInstance();
-      final savedMac = prefs.getString(_prefKeyMac);
-      final savedName = prefs.getString(_prefKeyName);
+      String? savedMac = prefs.getString(_prefKeyMac);
+      String? savedName = prefs.getString(_prefKeyName);
 
       final Map<String, BluetoothPrinterDevice> deviceMap = {};
 
@@ -157,9 +159,10 @@ class BluetoothPrinterService {
         }
       }
 
-      // 2. Query PrintBluetoothThermal plugin
+      // 2. Query PrintBluetoothThermal plugin (with timeout so it never hangs)
       try {
-        final list = await PrintBluetoothThermal.pairedBluetooths;
+        final list = await PrintBluetoothThermal.pairedBluetooths
+            .timeout(const Duration(milliseconds: 1000), onTimeout: () => []);
         for (final info in list) {
           final mac = info.macAdress.trim();
           if (mac.isNotEmpty && !deviceMap.containsKey(mac)) {
@@ -176,10 +179,25 @@ class BluetoothPrinterService {
         if (kDebugMode) print('[Bluetooth] PrintBluetoothThermal.pairedBluetooths: $e');
       }
 
-      // 3. Always include saved printer so it never disappears from the dropdown
+      // 3. Auto-save first printer found if no savedMac exists yet
+      if ((savedMac == null || savedMac.isEmpty) && deviceMap.isNotEmpty) {
+        final best = deviceMap.values.firstWhere(
+          (d) {
+            final n = d.name.toUpperCase();
+            return n.contains('MTP') || n.contains('POS') || n.contains('RPP') || n.contains('PRINT') || n.contains('THERMAL') || n.contains('58') || n.contains('80');
+          },
+          orElse: () => deviceMap.values.first,
+        );
+        savedMac = best.address;
+        savedName = best.name;
+        await prefs.setString(_prefKeyMac, savedMac);
+        await prefs.setString(_prefKeyName, savedName);
+      }
+
+      // 4. Always include saved printer so it never disappears from the dropdown
       if (savedMac != null && savedMac.isNotEmpty && !deviceMap.containsKey(savedMac)) {
         deviceMap[savedMac] = BluetoothPrinterDevice(
-          name: savedName ?? 'Saved Bluetooth Printer',
+          name: (savedName != null && savedName.isNotEmpty) ? savedName : 'MTP-3_5F22',
           address: savedMac,
           isConnected: isConn,
         );
@@ -216,7 +234,7 @@ class BluetoothPrinterService {
       final cleanMac = macAddress.trim();
       if (cleanMac.isEmpty) return false;
 
-      // Always save to SharedPreferences immediately so the app remembers this printer!
+      // Always save to SharedPreferences immediately so the app remembers this printer permanently!
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefKeyMac, cleanMac);
       if (printerName != null && printerName.isNotEmpty) {
@@ -239,22 +257,26 @@ class BluetoothPrinterService {
       // Clean disconnect of any previous session with small pause
       try {
         await PrintBluetoothThermal.disconnect;
-        await Future.delayed(const Duration(milliseconds: 200));
+        await Future.delayed(const Duration(milliseconds: 150));
       } catch (_) {}
 
-      // Attempt 1 via PrintBluetoothThermal
-      bool success = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac);
-
-      // Attempt 2 after short pause if attempt 1 was busy
-      if (!success) {
-        await Future.delayed(const Duration(milliseconds: 350));
-        success = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac);
+      // Connection attempts with retries
+      bool success = false;
+      for (int attempt = 1; attempt <= 3; attempt++) {
+        try {
+          success = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac)
+              .timeout(const Duration(seconds: 4), onTimeout: () => false);
+          if (success) break;
+        } catch (_) {}
+        if (attempt < 3) {
+          await Future.delayed(const Duration(milliseconds: 350));
+        }
       }
 
       final liveStatus = success || await PrintBluetoothThermal.connectionStatus;
       if (liveStatus) {
         _connectedDevice = BluetoothPrinterDevice(
-          name: printerName ?? 'Bluetooth Thermal Printer',
+          name: printerName ?? 'MTP-3_5F22',
           address: cleanMac,
           isConnected: true,
         );
@@ -303,7 +325,17 @@ class BluetoothPrinterService {
       }
 
       // 3. Transmit ESC/POS bytes to printer
-      final success = await PrintBluetoothThermal.writeBytes(bytes);
+      var success = await PrintBluetoothThermal.writeBytes(bytes);
+      if (!success) {
+        // Retry once after reconnect in case socket timed out while idle
+        final savedPrinter = await getSavedPrinter();
+        if (savedPrinter != null && savedPrinter.address.isNotEmpty) {
+          final reconnected = await connect(savedPrinter.address, printerName: savedPrinter.name);
+          if (reconnected) {
+            success = await PrintBluetoothThermal.writeBytes(bytes);
+          }
+        }
+      }
       return success;
     } catch (e) {
       if (kDebugMode) print('printBytes error: $e');
@@ -358,7 +390,7 @@ class BluetoothPrinterService {
             name = (printerDev['name'] ?? '').toString().trim();
             if (mac.isNotEmpty) {
               await prefs.setString(_prefKeyMac, mac);
-              await prefs.setString(_prefKeyName, name.isNotEmpty ? name : 'Bluetooth Printer');
+              await prefs.setString(_prefKeyName, name.isNotEmpty ? name : 'MTP-3_5F22');
             }
           }
         }
@@ -370,7 +402,7 @@ class BluetoothPrinterService {
     if (mac != null && mac.isNotEmpty) {
       final isConn = await PrintBluetoothThermal.connectionStatus;
       final dev = BluetoothPrinterDevice(
-        name: name?.isNotEmpty == true ? name! : 'Bluetooth Thermal Printer',
+        name: (name != null && name.isNotEmpty) ? name : 'MTP-3_5F22',
         address: mac,
         isConnected: isConn,
       );

@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../widgets/jay_pharma_logo.dart';
 import '../services/localization_service.dart';
 import '../services/location_service.dart';
+import '../services/bluetooth_printer_service.dart';
 import 'payment/select_customer_screen.dart';
 import 'receipts/receipts_screen.dart';
 import 'customers/customers_screen.dart';
@@ -38,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!appState.isAdmin) {
         appState.checkDayEndStatus();
       }
+      // Silently auto-connect to paired/saved Bluetooth receipt printer in background
+      BluetoothPrinterService.autoConnectToSavedPrinter();
     });
   }
 
