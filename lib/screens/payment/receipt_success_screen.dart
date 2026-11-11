@@ -8,6 +8,8 @@ import '../../widgets/thermal_receipt_view.dart';
 import '../../services/receipt_printer_service.dart';
 import '../../services/localization_service.dart';
 
+import '../../services/bluetooth_printer_service.dart';
+
 class ReceiptSuccessScreen extends StatefulWidget {
   final Receipt receipt;
 
@@ -19,11 +21,32 @@ class ReceiptSuccessScreen extends StatefulWidget {
 
 class _ReceiptSuccessScreenState extends State<ReceiptSuccessScreen> {
   bool _isPrinting = false;
+  int _selectedCopyTab = 0; // 0: All, 1: Customer Copy, 2: Accounts Copy
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-connect to saved printer when receipt success screen opens
+    BluetoothPrinterService.autoConnectToSavedPrinter();
+  }
 
   void _printReceipt() async {
     setState(() => _isPrinting = true);
     try {
-      await ReceiptPrinterService.printReceiptDirect(widget.receipt);
+      ReceiptCopyMode copyMode;
+      switch (_selectedCopyTab) {
+        case 1:
+          copyMode = ReceiptCopyMode.customerOnly;
+          break;
+        case 2:
+          copyMode = ReceiptCopyMode.accountsOnly;
+          break;
+        case 0:
+        default:
+          copyMode = ReceiptCopyMode.all;
+          break;
+      }
+      await ReceiptPrinterService.printReceiptDirect(widget.receipt, copyMode: copyMode);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -130,7 +153,11 @@ class _ReceiptSuccessScreenState extends State<ReceiptSuccessScreen> {
                   const SizedBox(height: 20),
 
                   // Interactive Thermal Receipt Layout matching Page 5
-                  ThermalReceiptView(receipt: widget.receipt),
+                  ThermalReceiptView(
+                    receipt: widget.receipt,
+                    selectedTab: _selectedCopyTab,
+                    onTabChanged: (tab) => setState(() => _selectedCopyTab = tab),
+                  ),
                   const SizedBox(height: 24),
 
                   // Action Buttons
@@ -138,7 +165,7 @@ class _ReceiptSuccessScreenState extends State<ReceiptSuccessScreen> {
                     onPressed: _isPrinting ? null : _printReceipt,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primaryNavy,
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                       minimumSize: const Size.fromHeight(50),
                     ),
                     child: _isPrinting
@@ -155,9 +182,16 @@ class _ReceiptSuccessScreenState extends State<ReceiptSuccessScreen> {
                             children: [
                               const Icon(Icons.print, size: 20),
                               const SizedBox(width: 8),
-                              Text(
-                                LocalizationService.tr('print_receipt', lang: lang),
-                                style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.bold),
+                              Flexible(
+                                child: Text(
+                                  _selectedCopyTab == 1
+                                      ? (lang == 'si' ? 'Customer Copy පමණක් මුද්‍රණය කරන්න' : 'Print Customer Copy Only')
+                                      : _selectedCopyTab == 2
+                                          ? (lang == 'si' ? 'Accounts Copy පමණක් මුද්‍රණය කරන්න' : 'Print Accounts Copy Only')
+                                          : (lang == 'si' ? 'පිටපත් 2ම මුද්‍රණය කරන්න (All Copies)' : 'Print Receipt (Both Copies)'),
+                                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                           ),

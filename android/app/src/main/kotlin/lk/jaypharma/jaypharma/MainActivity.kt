@@ -63,6 +63,16 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "cancelDiscovery" -> {
+                    try {
+                        val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                        val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                        adapter?.cancelDiscovery()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
                 "hasBluetoothPermissions" -> {
                     result.success(checkBtPermissions())
                 }

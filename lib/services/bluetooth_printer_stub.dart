@@ -20,6 +20,15 @@ class BluetoothPrinterService {
   static Future<bool> pairDevice(String address) async => true;
   static Future<Map<String, dynamic>> getDiagnostics() async => {'platform': 'web/desktop', 'status': 'ok'};
 
+  static Future<bool> autoConnectToSavedPrinter() async {
+    final saved = await getSavedPrinter();
+    if (saved != null) {
+      _connectedDevice = saved.copyWith(isConnected: true);
+      return true;
+    }
+    return false;
+  }
+
   static Future<bool> isConnected() async {
     return _connectedDevice != null && _connectedDevice!.isConnected;
   }
@@ -99,8 +108,17 @@ class BluetoothPrinterService {
     return true;
   }
 
-  static Future<bool> printReceiptDirect(Receipt receipt, {bool is80mm = true, bool isReprint = false}) async {
-    await ReceiptPrinterService.printReceiptDirect(receipt, isReprint: isReprint);
+  static Future<bool> printReceiptDirect(
+    Receipt receipt, {
+    bool is80mm = true,
+    bool isReprint = false,
+    ReceiptCopyMode copyMode = ReceiptCopyMode.all,
+  }) async {
+    await ReceiptPrinterService.printReceiptDirect(
+      receipt,
+      isReprint: isReprint,
+      copyMode: copyMode,
+    );
     return true;
   }
 

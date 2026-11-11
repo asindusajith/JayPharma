@@ -16,7 +16,11 @@ class ReceiptPrinterService {
 
   /// Generates thermal/standard PDF document with Dual Copies (Customer Copy + Accounts Copy)
   /// formatted matching the original clean Jay Pharma receipt layout.
-  static Future<Uint8List> generateReceiptPdf(Receipt receipt, {bool isReprint = false}) async {
+  static Future<Uint8List> generateReceiptPdf(
+    Receipt receipt, {
+    bool isReprint = false,
+    ReceiptCopyMode copyMode = ReceiptCopyMode.all,
+  }) async {
     final pdf = pw.Document();
 
     pw.MemoryImage? logoImage;
@@ -24,6 +28,9 @@ class ReceiptPrinterService {
       final bytes = await rootBundle.load('assets/images/jay_pharma_logo.png');
       logoImage = pw.MemoryImage(bytes.buffer.asUint8List());
     } catch (_) {}
+
+    final printCustomer = copyMode == ReceiptCopyMode.all || copyMode == ReceiptCopyMode.customerOnly;
+    final printAccounts = copyMode == ReceiptCopyMode.all || copyMode == ReceiptCopyMode.accountsOnly;
 
     pdf.addPage(
       pw.Page(
@@ -35,38 +42,41 @@ class ReceiptPrinterService {
               crossAxisAlignment: pw.CrossAxisAlignment.stretch,
               children: [
                 // 1. Customer Copy
-                _buildReceiptCopy(
-                  receipt: receipt,
-                  copyTitle: 'CUSTOMER COPY',
-                  logoImage: logoImage,
-                  isReprint: isReprint,
-                ),
+                if (printCustomer)
+                  _buildReceiptCopy(
+                    receipt: receipt,
+                    copyTitle: 'CUSTOMER COPY',
+                    logoImage: logoImage,
+                    isReprint: isReprint,
+                  ),
 
                 // 2. Cut / Tear Line
-                pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(vertical: 10),
-                  child: pw.Row(
-                    children: [
-                      pw.Expanded(child: pw.Divider(color: PdfColors.grey500, thickness: 0.8)),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(horizontal: 6),
-                        child: pw.Text(
-                          '- - - - CUT HERE - - - -',
-                          style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.grey700),
+                if (copyMode == ReceiptCopyMode.all)
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(vertical: 10),
+                    child: pw.Row(
+                      children: [
+                        pw.Expanded(child: pw.Divider(color: PdfColors.grey500, thickness: 0.8)),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.symmetric(horizontal: 6),
+                          child: pw.Text(
+                            '- - - - CUT HERE - - - -',
+                            style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.grey700),
+                          ),
                         ),
-                      ),
-                      pw.Expanded(child: pw.Divider(color: PdfColors.grey500, thickness: 0.8)),
-                    ],
+                        pw.Expanded(child: pw.Divider(color: PdfColors.grey500, thickness: 0.8)),
+                      ],
+                    ),
                   ),
-                ),
 
                 // 3. Accounts Copy
-                _buildReceiptCopy(
-                  receipt: receipt,
-                  copyTitle: 'ACCOUNTS COPY',
-                  logoImage: logoImage,
-                  isReprint: isReprint,
-                ),
+                if (printAccounts)
+                  _buildReceiptCopy(
+                    receipt: receipt,
+                    copyTitle: 'ACCOUNTS COPY',
+                    logoImage: logoImage,
+                    isReprint: isReprint,
+                  ),
               ],
             ),
           );
@@ -525,16 +535,35 @@ class ReceiptPrinterService {
   }
 
   /// Triggers direct Bluetooth thermal printing if connected, or falls back to system print dialog
-  static Future<void> printReceiptDirect(Receipt receipt, {bool isReprint = false}) async {
+  static Future<void> printReceiptDirect(
+    Receipt receipt, {
+    bool isReprint = false,
+    ReceiptCopyMode copyMode = ReceiptCopyMode.all,
+  }) async {
     try {
       final isBtConnected = await BluetoothPrinterService.isConnected();
       if (isBtConnected) {
-        final success = await BluetoothPrinterService.printReceiptDirect(receipt, isReprint: isReprint);
+        final success = await BluetoothPrinterService.printReceiptDirect(
+          receipt,
+          isReprint: isReprint,
+          copyMode: copyMode,
+        );
         if (success) return;
+      } else {
+        // Try auto-connect to saved printer if available before falling back
+        final savedConnected = await BluetoothPrinterService.autoConnectToSavedPrinter();
+        if (savedConnected) {
+          final success = await BluetoothPrinterService.printReceiptDirect(
+            receipt,
+            isReprint: isReprint,
+            copyMode: copyMode,
+          );
+          if (success) return;
+        }
       }
     } catch (_) {}
 
-    final pdfBytes = await generateReceiptPdf(receipt, isReprint: isReprint);
+    final pdfBytes = await generateReceiptPdf(receipt, isReprint: isReprint, copyMode: copyMode);
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdfBytes,
       name: 'JayPharma_Receipt_${receipt.manualReceiptNo}',

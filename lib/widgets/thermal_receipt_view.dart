@@ -7,11 +7,15 @@ import '../widgets/jay_pharma_logo.dart';
 class ThermalReceiptView extends StatefulWidget {
   final Receipt receipt;
   final bool isReprint;
+  final int selectedTab;
+  final ValueChanged<int>? onTabChanged;
 
   const ThermalReceiptView({
     super.key,
     required this.receipt,
     this.isReprint = false,
+    this.selectedTab = 0,
+    this.onTabChanged,
   });
 
   @override
@@ -20,7 +24,21 @@ class ThermalReceiptView extends StatefulWidget {
 
 class _ThermalReceiptViewState extends State<ThermalReceiptView> {
   // 0: All (Both Copies), 1: Customer Copy, 2: Accounts Copy
-  int _selectedTab = 0;
+  late int _selectedTab;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedTab = widget.selectedTab;
+  }
+
+  @override
+  void didUpdateWidget(covariant ThermalReceiptView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedTab != widget.selectedTab) {
+      _selectedTab = widget.selectedTab;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +168,10 @@ class _ThermalReceiptViewState extends State<ThermalReceiptView> {
     final isSelected = _selectedTab == index;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedTab = index),
+        onTap: () {
+          setState(() => _selectedTab = index);
+          widget.onTabChanged?.call(index);
+        },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(

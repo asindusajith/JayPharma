@@ -6,7 +6,12 @@ import '../models/receipt.dart';
 
 class EscPosReceiptBuilder {
   /// Builds complete raw ESC/POS bytes matching 80mm thermal receipt specifications
-  static Future<List<int>> buildReceiptBytes(Receipt receipt, {bool is80mm = true, bool isReprint = false}) async {
+  static Future<List<int>> buildReceiptBytes(
+    Receipt receipt, {
+    bool is80mm = true,
+    bool isReprint = false,
+    ReceiptCopyMode copyMode = ReceiptCopyMode.all,
+  }) async {
     final profile = await CapabilityProfile.load();
     final paperSize = is80mm ? PaperSize.mm80 : PaperSize.mm58;
     final generator = Generator(paperSize, profile);
@@ -45,18 +50,27 @@ class EscPosReceiptBuilder {
       }
     } catch (_) {}
 
+    final printCustomer = copyMode == ReceiptCopyMode.all || copyMode == ReceiptCopyMode.customerOnly;
+    final printAccounts = copyMode == ReceiptCopyMode.all || copyMode == ReceiptCopyMode.accountsOnly;
+
     // 1. Copy 1: Customer Copy
-    bytes += _buildSingleCopy(generator, receipt, 'CUSTOMER COPY', logoImage: logoImage, is80mm: is80mm, isReprint: isReprint);
+    if (printCustomer) {
+      bytes += _buildSingleCopy(generator, receipt, 'CUSTOMER COPY', logoImage: logoImage, is80mm: is80mm, isReprint: isReprint);
+    }
 
     // 2. Cut Here Divider with proper spacing
-    bytes += generator.feed(1);
-    bytes += generator.hr(ch: '-');
-    bytes += generator.text('- - - - - - - - - CUT HERE - - - - - - - - -', styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.hr(ch: '-');
-    bytes += generator.feed(1);
+    if (copyMode == ReceiptCopyMode.all) {
+      bytes += generator.feed(1);
+      bytes += generator.hr(ch: '-');
+      bytes += generator.text('- - - - - - - - - CUT HERE - - - - - - - - -', styles: const PosStyles(align: PosAlign.center));
+      bytes += generator.hr(ch: '-');
+      bytes += generator.feed(1);
+    }
 
     // 3. Copy 2: Accounts Copy
-    bytes += _buildSingleCopy(generator, receipt, 'ACCOUNTS COPY', logoImage: logoImage, is80mm: is80mm, isReprint: isReprint);
+    if (printAccounts) {
+      bytes += _buildSingleCopy(generator, receipt, 'ACCOUNTS COPY', logoImage: logoImage, is80mm: is80mm, isReprint: isReprint);
+    }
 
     // Final feed and paper cut: direct ESC/POS cut without generator.cut()'s 5 empty lines
     bytes += generator.feed(1);

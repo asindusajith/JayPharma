@@ -132,8 +132,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final isBtOn = await BluetoothPrinterService.isBluetoothEnabled();
       _isBluetoothEnabled = isBtOn;
 
-      final devices = await BluetoothPrinterService.getPairedDevices(requestPerm: true);
+      final devices = await BluetoothPrinterService.getPairedDevices(requestPerm: true, scanNearby: false);
       final saved = await BluetoothPrinterService.getSavedPrinter();
+
+      // Ensure saved printer is always in the list so dropdown never loses it
+      if (saved != null && !devices.any((d) => d.address == saved.address)) {
+        devices.add(saved);
+      }
 
       BluetoothPrinterDevice? current;
       if (saved != null) {
@@ -145,11 +150,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
         current = devices.first;
       }
 
+      final isConn = await BluetoothPrinterService.isConnected();
+      if (current != null) {
+        current = current.copyWith(isConnected: isConn);
+      }
+
       if (mounted) {
         setState(() {
           _pairedPrinters = devices;
           _selectedPrinterDevice = current;
           _isScanningPrinters = false;
+        });
+      }
+
+      // Auto-connect in background if disconnected and Bluetooth is ON
+      if (current != null && !isConn && isBtOn) {
+        BluetoothPrinterService.autoConnectToSavedPrinter().then((connected) {
+          if (connected && mounted) {
+            setState(() {
+              _selectedPrinterDevice = _selectedPrinterDevice?.copyWith(isConnected: true);
+              final idx = _pairedPrinters.indexWhere((p) => p.address == current!.address);
+              if (idx >= 0) {
+                _pairedPrinters[idx] = _pairedPrinters[idx].copyWith(isConnected: true);
+              }
+            });
+          }
         });
       }
     } catch (_) {
@@ -163,11 +188,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _isConnectingPrinter = true);
     try {
       final success = await BluetoothPrinterService.connect(device.address, printerName: device.name);
+      final isConn = success || await BluetoothPrinterService.isConnected();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              success
+              isConn
                   ? (lang == 'si'
                       ? '${device.name} මුද්‍රණ යන්ත්‍රය සාර්ථකව සම්බන්ධ විය!'
                       : '${device.name} connected successfully!')
@@ -175,7 +201,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? 'සම්බන්ධ වීමට නොහැකි විය. මුද්‍රණ යන්ත්‍රය ක්‍රියාත්මක කර ඇත්දැයි බලන්න.'
                       : 'Connection failed. Please ensure the printer is turned ON and nearby.'),
             ),
-            backgroundColor: success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+            backgroundColor: isConn ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
           ),
         );
       }

@@ -119,7 +119,7 @@ class BluetoothPrinterService {
 
   /// Returns list of paired Bluetooth devices on the system
   /// Combines plugin discovery with native Android BluetoothAdapter fallback & Live Discovery
-  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = true, bool scanNearby = true}) async {
+  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = true, bool scanNearby = false}) async {
     try {
       if (requestPerm) {
         await requestPermission();
@@ -151,7 +151,7 @@ class BluetoothPrinterService {
         if (kDebugMode) print('[Bluetooth] PrintBluetoothThermal.pairedBluetooths: $e');
       }
 
-      // 2. Query Native Android BluetoothAdapter (bonded + live discovery of nearby broadcasting printers)
+      // 2. Query Native Android BluetoothAdapter (bonded + live discovery if explicitly requested)
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         try {
           final methodName = scanNearby ? 'scanNearbyDevices' : 'getBondedDevices';
@@ -179,7 +179,7 @@ class BluetoothPrinterService {
         }
       }
 
-      // 3. If a saved printer exists but wasn't found in current scan, retain it
+      // 3. Always include saved printer so it never disappears from the dropdown
       if (savedMac != null && savedMac.isNotEmpty && !deviceMap.containsKey(savedMac)) {
         deviceMap[savedMac] = BluetoothPrinterDevice(
           name: savedName ?? 'Saved Bluetooth Printer',
@@ -195,15 +195,66 @@ class BluetoothPrinterService {
     }
   }
 
-  /// Connects directly to a printer using its MAC address
+  /// Automatically connects in the background to the previously saved printer if available and Bluetooth is ON
+  static Future<bool> autoConnectToSavedPrinter() async {
+    try {
+      final isConn = await isConnected();
+      if (isConn) return true;
+
+      final isBtOn = await isBluetoothEnabled();
+      if (!isBtOn) return false;
+
+      final prefs = await SharedPreferences.getInstance();
+      final savedMac = prefs.getString(_prefKeyMac);
+      final savedName = prefs.getString(_prefKeyName);
+      if (savedMac != null && savedMac.isNotEmpty) {
+        return await connect(savedMac, printerName: savedName);
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Connects directly to a printer using its MAC address with automatic retry
   static Future<bool> connect(String macAddress, {String? printerName}) async {
     try {
-      // Disconnect current if any
-      await disconnect();
-
       final cleanMac = macAddress.trim();
-      final success = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac);
-      if (success) {
+      if (cleanMac.isEmpty) return false;
+
+      // 1. If already connected to this device, verify and return true
+      if (_connectedDevice?.address == cleanMac) {
+        final alreadyOk = await isConnected();
+        if (alreadyOk) return true;
+      }
+
+      // 2. Cancel discovery on Android before attempting RFCOMM socket connection
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        try {
+          await _nativeBtChannel.invokeMethod('cancelDiscovery');
+        } catch (_) {}
+      }
+
+      // 3. Clean up previous socket with a settling pause
+      if (_connectedDevice != null) {
+        await disconnect();
+        await Future.delayed(const Duration(milliseconds: 250));
+      }
+
+      // 4. Attempt connection
+      bool success = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac);
+
+      // 5. If first attempt fails, pause 400ms and retry once (handles printer RFCOMM wake-up)
+      if (!success) {
+        await Future.delayed(const Duration(milliseconds: 400));
+        success = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac);
+      }
+
+      // 6. Verify connection status
+      final bool liveStatus = await isConnected();
+      final bool effectiveSuccess = success || liveStatus;
+
+      if (effectiveSuccess) {
         _connectedDevice = BluetoothPrinterDevice(
           name: printerName ?? 'Bluetooth Thermal Printer',
           address: cleanMac,
@@ -215,8 +266,10 @@ class BluetoothPrinterService {
         if (printerName != null) {
           await prefs.setString(_prefKeyName, printerName);
         }
+        return true;
       }
-      return success;
+
+      return false;
     } catch (e) {
       if (kDebugMode) print('connect error: $e');
       return false;
@@ -260,8 +313,18 @@ class BluetoothPrinterService {
   }
 
   /// Prints a receipt directly over Bluetooth ESC/POS
-  static Future<bool> printReceiptDirect(Receipt receipt, {bool is80mm = true, bool isReprint = false}) async {
-    final bytes = await EscPosReceiptBuilder.buildReceiptBytes(receipt, is80mm: is80mm, isReprint: isReprint);
+  static Future<bool> printReceiptDirect(
+    Receipt receipt, {
+    bool is80mm = true,
+    bool isReprint = false,
+    ReceiptCopyMode copyMode = ReceiptCopyMode.all,
+  }) async {
+    final bytes = await EscPosReceiptBuilder.buildReceiptBytes(
+      receipt,
+      is80mm: is80mm,
+      isReprint: isReprint,
+      copyMode: copyMode,
+    );
     return await printBytes(bytes);
   }
 

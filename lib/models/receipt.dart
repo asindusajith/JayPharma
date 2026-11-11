@@ -1,5 +1,6 @@
 enum PaymentMethod { cash, cheque }
 enum SyncStatus { synced, pendingSync }
+enum ReceiptCopyMode { all, customerOnly, accountsOnly }
 
 class ReceiptInvoiceItem {
   final int itemIndex;

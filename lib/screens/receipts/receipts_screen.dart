@@ -581,94 +581,122 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
 
   // View Receipt Full Modal with Controlled Reprint Action
   void _showReceiptDetailsModal(BuildContext context, Receipt r, AppState appState, String lang) {
+    int selectedCopyTab = 0;
+    final isSi = lang == 'si';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        maxChildSize: 0.95,
-        minChildSize: 0.5,
-        builder: (_, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFFF1F5F9),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              // Modal Handle
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(16),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        ThermalReceiptView(receipt: r),
-                        const SizedBox(height: 20),
-
-                        // Section 2.2 Page 5 & Section 6: Controlled Reprint with OTP
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFEF3C7),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFFDE68A)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (modalCtx, setModalState) => DraggableScrollableSheet(
+          initialChildSize: 0.9,
+          maxChildSize: 0.95,
+          minChildSize: 0.5,
+          builder: (_, scrollController) => Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              children: [
+                // Modal Handle
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    padding: const EdgeInsets.all(16),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          ThermalReceiptView(
+                            receipt: r,
+                            selectedTab: selectedCopyTab,
+                            onTabChanged: (tab) => setModalState(() => selectedCopyTab = tab),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.security, color: Color(0xFFD97706), size: 18),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    LocalizationService.tr('otp_required', lang: lang),
-                                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF92400E)),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                LocalizationService.tr('otp_sub', lang: lang),
-                                style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF78350F)),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 14),
+                          const SizedBox(height: 20),
 
-                        // Reprint with OTP button
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.vpn_key, size: 18),
-                          label: Text(LocalizationService.tr('reprint', lang: lang)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryNavy,
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                            minimumSize: const Size.fromHeight(48),
+                          // Section 2.2 Page 5 & Section 6: Controlled Reprint with OTP
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF3C7),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFFDE68A)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.security, color: Color(0xFFD97706), size: 18),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      LocalizationService.tr('otp_required', lang: lang),
+                                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF92400E)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  LocalizationService.tr('otp_sub', lang: lang),
+                                  style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF78350F)),
+                                ),
+                              ],
+                            ),
                           ),
-                          onPressed: () {
-                            _promptOtpForReprint(context, r, appState, lang);
-                          },
-                        ),
-                        const SizedBox(height: 10),
+                          const SizedBox(height: 14),
 
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: Text(LocalizationService.tr('cancel', lang: lang)),
-                        ),
-                      ],
+                          // Reprint with OTP button
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.vpn_key, size: 18),
+                            label: Text(
+                              selectedCopyTab == 1
+                                  ? (isSi ? 'Customer Copy පමණක් නැවත මුද්‍රණය' : 'Reprint Customer Copy Only')
+                                  : selectedCopyTab == 2
+                                      ? (isSi ? 'Accounts Copy පමණක් නැවත මුද්‍රණය' : 'Reprint Accounts Copy Only')
+                                      : (isSi ? 'පිටපත් 2ම නැවත මුද්‍රණය කරන්න (All)' : 'Reprint Receipt (Both Copies)'),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryNavy,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                              minimumSize: const Size.fromHeight(48),
+                            ),
+                            onPressed: () {
+                              ReceiptCopyMode copyMode;
+                              switch (selectedCopyTab) {
+                                case 1:
+                                  copyMode = ReceiptCopyMode.customerOnly;
+                                  break;
+                                case 2:
+                                  copyMode = ReceiptCopyMode.accountsOnly;
+                                  break;
+                                case 0:
+                                default:
+                                  copyMode = ReceiptCopyMode.all;
+                                  break;
+                              }
+                              _promptOtpForReprint(context, r, appState, lang, copyMode: copyMode);
+                            },
+                          ),
+                          const SizedBox(height: 10),
+
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: Text(LocalizationService.tr('cancel', lang: lang)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -676,7 +704,7 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
   }
 
   // OTP Verification Dialog for Reprinting (Page 5 Requirement)
-  void _promptOtpForReprint(BuildContext context, Receipt r, AppState appState, String lang) {
+  void _promptOtpForReprint(BuildContext context, Receipt r, AppState appState, String lang, {ReceiptCopyMode copyMode = ReceiptCopyMode.all}) {
     final isSi = lang == 'si';
 
     // Generate new OTP for this session
@@ -809,8 +837,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                   reason: reason.isNotEmpty ? reason : 'Authorized reprint',
                 );
 
-                // Trigger print with duplicate watermark
-                await ReceiptPrinterService.printReceiptDirect(r, isReprint: true);
+                // Trigger print with duplicate watermark and selected copy mode
+                await ReceiptPrinterService.printReceiptDirect(r, isReprint: true, copyMode: copyMode);
 
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(

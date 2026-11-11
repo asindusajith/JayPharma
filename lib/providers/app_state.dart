@@ -12,6 +12,7 @@ import '../models/day_end_summary.dart';
 import '../models/audit_log.dart';
 import '../services/location_service.dart';
 import '../services/sms_service.dart';
+import '../services/bluetooth_printer_service.dart';
 
 import '../models/app_user.dart';
 
@@ -192,8 +193,18 @@ class AppState extends ChangeNotifier {
     _startInactivityTimer();
     _autoDetectApiUrl();
     _initGpsMonitoring();
+    _initBluetoothPrinter();
     fetchRealtimeCustomers();
     fetchRealtimeReceipts();
+  }
+
+  void _initBluetoothPrinter() {
+    // Attempt auto-connecting to saved Bluetooth printer on app launch
+    Future.delayed(const Duration(seconds: 2), () async {
+      try {
+        await BluetoothPrinterService.autoConnectToSavedPrinter();
+      } catch (_) {}
+    });
   }
 
   bool isConnectingGps = false;
