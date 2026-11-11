@@ -383,7 +383,7 @@ class _ThermalReceiptViewState extends State<ThermalReceiptView> {
             ),
           )
         else
-          for (final inv in receipt.allocatedInvoices)
+          for (final inv in receipt.allocatedInvoices) ...[
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),
               child: Row(
@@ -396,6 +396,23 @@ class _ThermalReceiptViewState extends State<ThermalReceiptView> {
                 ],
               ),
             ),
+            if (inv.excessAmount > 0.01)
+              Padding(
+                padding: const EdgeInsets.only(left: 20, bottom: 3),
+                child: Row(
+                  children: [
+                    Text(
+                      '↳ ExAmount (Excess): ',
+                      style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.bold, color: const Color(0xFF15803D)),
+                    ),
+                    Text(
+                      'Rs. ${currency.format(inv.excessAmount)}',
+                      style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.bold, color: const Color(0xFF15803D)),
+                    ),
+                  ],
+                ),
+              ),
+          ],
 
         const Divider(color: Color(0xFF94A3B8), thickness: 1, height: 14),
 

@@ -989,9 +989,20 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
         // 4. Insert Allocated Invoices in JayPharmaApp
         if (dto.AllocatedInvoices != null)
         {
+            decimal totalSettledApp = dto.AllocatedInvoices.Sum(x => Convert.ToDecimal(x.AmountSettled));
+            decimal unallocatedAdvanceApp = Convert.ToDecimal(dto.TotalAmount) - totalSettledApp;
+            if (unallocatedAdvanceApp < 0m) unallocatedAdvanceApp = 0m;
+
             for (int i = 0; i < dto.AllocatedInvoices.Count; i++)
             {
                 var item = dto.AllocatedInvoices[i];
+                decimal itemEx = 0m;
+                if (item.ExcessAmount.HasValue && item.ExcessAmount.Value > 0)
+                    itemEx = Convert.ToDecimal(item.ExcessAmount.Value);
+                else if (item.ExAmount.HasValue && item.ExAmount.Value > 0)
+                    itemEx = Convert.ToDecimal(item.ExAmount.Value);
+                else if (unallocatedAdvanceApp > 0.01m && (dto.AllocatedInvoices.Count == 1 || i == dto.AllocatedInvoices.Count - 1))
+                    itemEx = unallocatedAdvanceApp;
 
                 using var itemCmd = conn.CreateCommand();
                 itemCmd.Transaction = tx;
@@ -1003,9 +1014,9 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
                     END
 
                     INSERT INTO ReceiptInvoices 
-                    (ManualReceiptNo, ItemIndex, InvoiceNo, InvoiceDate, InvoiceAmount, AmountSettled, RemainingBalance)
+                    (ManualReceiptNo, ItemIndex, InvoiceNo, InvoiceDate, InvoiceAmount, AmountSettled, RemainingBalance, ExAmount)
                     VALUES 
-                    (@rNo, @idx, @invNo, @invDate, @invAmt, @settled, @remBal);
+                    (@rNo, @idx, @invNo, @invDate, @invAmt, @settled, @remBal, @exAmt);
 
                     UPDATE Invoices 
                     SET OutstandingBalance = CASE 
@@ -1026,6 +1037,7 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
                 itemCmd.Parameters.AddWithValue("@invAmt", item.InvoiceAmount);
                 itemCmd.Parameters.AddWithValue("@settled", item.AmountSettled);
                 itemCmd.Parameters.AddWithValue("@remBal", item.RemainingBalance);
+                itemCmd.Parameters.AddWithValue("@exAmt", itemEx);
 
                 await itemCmd.ExecuteNonQueryAsync();
             }
@@ -1078,19 +1090,39 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
 
             if (dto.AllocatedInvoices != null && dto.AllocatedInvoices.Count > 0)
             {
-                foreach (var item in dto.AllocatedInvoices)
+                decimal totalSettled = dto.AllocatedInvoices.Sum(x => Convert.ToDecimal(x.AmountSettled));
+                decimal unallocatedAdvance = Convert.ToDecimal(dto.TotalAmount) - totalSettled;
+                if (unallocatedAdvance < 0m) unallocatedAdvance = 0m;
+
+                for (int idx = 0; idx < dto.AllocatedInvoices.Count; idx++)
                 {
+                    var item = dto.AllocatedInvoices[idx];
                     if (int.TryParse(item.InvoiceNo, out int invNoInt))
                     {
+                        // Calculate ExAmount for this invoice:
+                        decimal itemExAmount = 0m;
+                        if (item.ExcessAmount.HasValue && item.ExcessAmount.Value > 0)
+                        {
+                            itemExAmount = Convert.ToDecimal(item.ExcessAmount.Value);
+                        }
+                        else if (item.ExAmount.HasValue && item.ExAmount.Value > 0)
+                        {
+                            itemExAmount = Convert.ToDecimal(item.ExAmount.Value);
+                        }
+                        else if (unallocatedAdvance > 0.01m && (dto.AllocatedInvoices.Count == 1 || idx == dto.AllocatedInvoices.Count - 1))
+                        {
+                            itemExAmount = unallocatedAdvance;
+                        }
+
                         // 1. Write to AppInvoice in Main ERP (DO NOT TOUCH dbo.Invoice!)
                         using var appInvCmd = erpConn.CreateCommand();
                         appInvCmd.CommandText = @"
                             INSERT INTO dbo.AppInvoice 
                             (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
-                             PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
+                             PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3, ExAmount)
                             VALUES 
                             (@inv, @date, @cCode, @cName, @inVal, @setAmt, 'Jay Pharma', @settleType, 0, @remBal, @totAmt, @mrNo, @details,
-                             @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
+                             @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3, @exAmt);";
 
                         appInvCmd.Parameters.AddWithValue("@inv", invNoInt);
                         appInvCmd.Parameters.AddWithValue("@date", DateTime.Now.Date);
@@ -1113,6 +1145,7 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
                         appInvCmd.Parameters.AddWithValue("@det1", dto.Comments?.Trim() ?? "");
                         appInvCmd.Parameters.AddWithValue("@det2", resolvedLocation);
                         appInvCmd.Parameters.AddWithValue("@det3", "");
+                        appInvCmd.Parameters.AddWithValue("@exAmt", itemExAmount);
                         await appInvCmd.ExecuteNonQueryAsync();
 
                         // 2. Insert into Main ERP DPay table
@@ -1120,7 +1153,7 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
                         dpayCmd.CommandText = @"
                             DECLARE @newRNo INT = (SELECT ISNULL(MAX(RNo), 0) + 1 FROM DPay);
                             INSERT INTO DPay (RNo, Date, InvNo, CCode, Name, Branch, Details, Amount, ShEx, Type, CheNo, PDDate, [Check], Audit, MRNo)
-                            VALUES (@newRNo, @date, @inv, @cCode, @cName, 'Jay Pharma', @details, @amount, 0, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
+                            VALUES (@newRNo, @date, @inv, @cCode, @cName, 'Jay Pharma', @details, @amount, @shEx, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
 
                         dpayCmd.Parameters.AddWithValue("@date", DateTime.Now.Date);
                         dpayCmd.Parameters.AddWithValue("@inv", invNoInt);
@@ -1128,62 +1161,13 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
                         dpayCmd.Parameters.AddWithValue("@cName", dto.CustomerName?.Trim() ?? "");
                         dpayCmd.Parameters.AddWithValue("@details", $"Field Payment by {dto.CollectorName}");
                         dpayCmd.Parameters.AddWithValue("@amount", item.AmountSettled);
+                        dpayCmd.Parameters.AddWithValue("@shEx", itemExAmount);
                         dpayCmd.Parameters.AddWithValue("@type", dto.PaymentMethod.Equals("CHEQUE", StringComparison.OrdinalIgnoreCase) ? "Cheque" : "Cash");
                         dpayCmd.Parameters.AddWithValue("@cheNo", (object?)dto.ChequeNumber ?? "");
                         dpayCmd.Parameters.AddWithValue("@pdDate", dto.ChequeDate.HasValue ? dto.ChequeDate.Value.ToString("dd/MM/yyyy") : "");
                         dpayCmd.Parameters.AddWithValue("@mrNo", numericReceiptNo);
                         await dpayCmd.ExecuteNonQueryAsync();
                     }
-                }
-
-                // If invoice allocations did not exhaust TotalAmount, write remaining balance as Advance
-                decimal totalSettled = dto.AllocatedInvoices.Sum(x => Convert.ToDecimal(x.AmountSettled));
-                decimal unallocatedAdvance = Convert.ToDecimal(dto.TotalAmount) - totalSettled;
-                if (unallocatedAdvance > 0.01m)
-                {
-                    using var advCmd = erpConn.CreateCommand();
-                    advCmd.CommandText = @"
-                        INSERT INTO dbo.AppInvoice 
-                        (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
-                         PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
-                        VALUES 
-                        (0, @date, @cCode, @cName, 0, @setAmt, 'Jay Pharma', 'Advance', 0, 0, @totAmt, @mrNo, @details,
-                         @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
-
-                    advCmd.Parameters.AddWithValue("@date", DateTime.Now.Date);
-                    advCmd.Parameters.AddWithValue("@cCode", numericCustCode);
-                    advCmd.Parameters.AddWithValue("@cName", dto.CustomerName?.Trim() ?? "");
-                    advCmd.Parameters.AddWithValue("@setAmt", unallocatedAdvance);
-                    advCmd.Parameters.AddWithValue("@totAmt", dto.TotalAmount);
-                    advCmd.Parameters.AddWithValue("@mrNo", dto.ManualReceiptNo?.Trim() ?? "");
-                    advCmd.Parameters.AddWithValue("@details", $"Advance Balance | Collector: {dto.CollectorName ?? ""}");
-
-                    advCmd.Parameters.AddWithValue("@payType", string.IsNullOrWhiteSpace(dto.PaymentMethod) ? "CASH" : dto.PaymentMethod.Trim());
-                    advCmd.Parameters.AddWithValue("@bank", dto.Bank?.Trim() ?? "");
-                    advCmd.Parameters.AddWithValue("@chqBranch", resolvedBranch);
-                    advCmd.Parameters.AddWithValue("@chqNo", dto.ChequeNumber?.Trim() ?? "");
-                    advCmd.Parameters.AddWithValue("@chqDate", dto.ChequeDate.HasValue ? (object)dto.ChequeDate.Value.Date : DBNull.Value);
-                    advCmd.Parameters.AddWithValue("@det1", dto.Comments?.Trim() ?? "");
-                    advCmd.Parameters.AddWithValue("@det2", resolvedLocation);
-                    advCmd.Parameters.AddWithValue("@det3", "");
-                    await advCmd.ExecuteNonQueryAsync();
-
-                    using var dpayAdvCmd = erpConn.CreateCommand();
-                    dpayAdvCmd.CommandText = @"
-                        DECLARE @newRNo INT = (SELECT ISNULL(MAX(RNo), 0) + 1 FROM DPay);
-                        INSERT INTO DPay (RNo, Date, InvNo, CCode, Name, Branch, Details, Amount, ShEx, Type, CheNo, PDDate, [Check], Audit, MRNo)
-                        VALUES (@newRNo, @date, 0, @cCode, @cName, 'Jay Pharma', @details, @amount, 0, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
-
-                    dpayAdvCmd.Parameters.AddWithValue("@date", DateTime.Now.Date);
-                    dpayAdvCmd.Parameters.AddWithValue("@cCode", numericCustCode);
-                    dpayAdvCmd.Parameters.AddWithValue("@cName", dto.CustomerName?.Trim() ?? "");
-                    dpayAdvCmd.Parameters.AddWithValue("@details", $"Field Advance Balance by {dto.CollectorName}");
-                    dpayAdvCmd.Parameters.AddWithValue("@amount", unallocatedAdvance);
-                    dpayAdvCmd.Parameters.AddWithValue("@type", dto.PaymentMethod.Equals("CHEQUE", StringComparison.OrdinalIgnoreCase) ? "Cheque" : "Cash");
-                    dpayAdvCmd.Parameters.AddWithValue("@cheNo", (object?)dto.ChequeNumber ?? "");
-                    dpayAdvCmd.Parameters.AddWithValue("@pdDate", dto.ChequeDate.HasValue ? dto.ChequeDate.Value.ToString("dd/MM/yyyy") : "");
-                    dpayAdvCmd.Parameters.AddWithValue("@mrNo", numericReceiptNo);
-                    await dpayAdvCmd.ExecuteNonQueryAsync();
                 }
             }
             else if (dto.TotalAmount > 0)
@@ -1193,10 +1177,10 @@ app.MapPost("/api/receipts", async (CreateReceiptDto dto, IMemoryCache cache) =>
                 appInvCmd.CommandText = @"
                     INSERT INTO dbo.AppInvoice 
                     (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
-                     PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
+                     PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3, ExAmount)
                     VALUES 
                     (0, @date, @cCode, @cName, 0, @setAmt, 'Jay Pharma', 'Advance', 0, 0, @totAmt, @mrNo, @details,
-                     @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
+                     @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3, 0);";
 
                 appInvCmd.Parameters.AddWithValue("@date", DateTime.Now.Date);
                 appInvCmd.Parameters.AddWithValue("@cCode", numericCustCode);
@@ -1319,7 +1303,7 @@ app.MapPost("/api/receipts/resync-to-erp", async () =>
             var invs = new List<dynamic>();
             using (var invCmd = appConn.CreateCommand())
             {
-                invCmd.CommandText = "SELECT InvoiceNo, InvoiceAmount, AmountSettled, RemainingBalance FROM ReceiptInvoices WHERE ManualReceiptNo = @mr ORDER BY ItemIndex";
+                invCmd.CommandText = "SELECT InvoiceNo, InvoiceAmount, AmountSettled, RemainingBalance, ISNULL(ExAmount, 0) AS ExAmount FROM ReceiptInvoices WHERE ManualReceiptNo = @mr ORDER BY ItemIndex";
                 invCmd.Parameters.AddWithValue("@mr", mrNo);
                 using var invReader = await invCmd.ExecuteReaderAsync();
                 while (await invReader.ReadAsync())
@@ -1329,7 +1313,8 @@ app.MapPost("/api/receipts/resync-to-erp", async () =>
                         InvoiceNo = invReader["InvoiceNo"].ToString()!,
                         InvoiceAmount = Convert.ToDouble(invReader["InvoiceAmount"]),
                         AmountSettled = Convert.ToDouble(invReader["AmountSettled"]),
-                        RemainingBalance = Convert.ToDouble(invReader["RemainingBalance"])
+                        RemainingBalance = Convert.ToDouble(invReader["RemainingBalance"]),
+                        ExAmount = Convert.ToDouble(invReader["ExAmount"])
                     });
                 }
             }
@@ -1352,18 +1337,29 @@ app.MapPost("/api/receipts/resync-to-erp", async () =>
 
             if (invs.Count > 0)
             {
-                foreach (var item in invs)
+                decimal totalSettled = invs.Sum(x => Convert.ToDecimal(x.AmountSettled));
+                decimal unallocatedAdvance = Convert.ToDecimal(r.TotalAmount) - totalSettled;
+                if (unallocatedAdvance < 0m) unallocatedAdvance = 0m;
+
+                for (int idx = 0; idx < invs.Count; idx++)
                 {
+                    var item = invs[idx];
                     if (int.TryParse(item.InvoiceNo, out int invNoInt))
                     {
+                        decimal itemExAmount = Convert.ToDecimal(item.ExAmount);
+                        if (itemExAmount <= 0.01m && unallocatedAdvance > 0.01m && (invs.Count == 1 || idx == invs.Count - 1))
+                        {
+                            itemExAmount = unallocatedAdvance;
+                        }
+
                         using var appInvCmd = erpConn.CreateCommand();
                         appInvCmd.CommandText = @"
                             INSERT INTO dbo.AppInvoice 
                             (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
-                             PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
+                             PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3, ExAmount)
                             VALUES 
                             (@inv, @date, @cCode, @cName, @inVal, @setAmt, 'Jay Pharma', @settleType, 0, @remBal, @totAmt, @mrNo, @details,
-                             @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
+                             @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3, @exAmt);";
 
                         appInvCmd.Parameters.AddWithValue("@inv", invNoInt);
                         appInvCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
@@ -1384,13 +1380,14 @@ app.MapPost("/api/receipts/resync-to-erp", async () =>
                         appInvCmd.Parameters.AddWithValue("@det1", r.Comments ?? "");
                         appInvCmd.Parameters.AddWithValue("@det2", resolvedLocation);
                         appInvCmd.Parameters.AddWithValue("@det3", "");
+                        appInvCmd.Parameters.AddWithValue("@exAmt", itemExAmount);
                         await appInvCmd.ExecuteNonQueryAsync();
 
                         using var dpayCmd = erpConn.CreateCommand();
                         dpayCmd.CommandText = @"
                             DECLARE @newRNo INT = (SELECT ISNULL(MAX(RNo), 0) + 1 FROM DPay);
                             INSERT INTO DPay (RNo, Date, InvNo, CCode, Name, Branch, Details, Amount, ShEx, Type, CheNo, PDDate, [Check], Audit, MRNo)
-                            VALUES (@newRNo, @date, @inv, @cCode, @cName, 'Jay Pharma', @details, @amount, 0, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
+                            VALUES (@newRNo, @date, @inv, @cCode, @cName, 'Jay Pharma', @details, @amount, @shEx, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
 
                         dpayCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
                         dpayCmd.Parameters.AddWithValue("@inv", invNoInt);
@@ -1398,62 +1395,13 @@ app.MapPost("/api/receipts/resync-to-erp", async () =>
                         dpayCmd.Parameters.AddWithValue("@cName", r.CustomerName);
                         dpayCmd.Parameters.AddWithValue("@details", $"Resync Payment by {r.CollectorName}");
                         dpayCmd.Parameters.AddWithValue("@amount", item.AmountSettled);
+                        dpayCmd.Parameters.AddWithValue("@shEx", itemExAmount);
                         dpayCmd.Parameters.AddWithValue("@type", r.PaymentMethod.Equals("CHEQUE", StringComparison.OrdinalIgnoreCase) ? "Cheque" : "Cash");
                         dpayCmd.Parameters.AddWithValue("@cheNo", (object?)r.ChequeNumber ?? "");
                         dpayCmd.Parameters.AddWithValue("@pdDate", r.ChequeDate != null ? ((DateTime)r.ChequeDate).ToString("dd/MM/yyyy") : "");
                         dpayCmd.Parameters.AddWithValue("@mrNo", numericReceiptNo);
                         await dpayCmd.ExecuteNonQueryAsync();
                     }
-                }
-
-                // Resync: If invoice allocations did not exhaust TotalAmount, write remaining balance as Advance
-                decimal totalSettled = invs.Sum(x => Convert.ToDecimal(x.AmountSettled));
-                decimal unallocatedAdvance = Convert.ToDecimal(r.TotalAmount) - totalSettled;
-                if (unallocatedAdvance > 0.01m)
-                {
-                    using var advCmd = erpConn.CreateCommand();
-                    advCmd.CommandText = @"
-                        INSERT INTO dbo.AppInvoice 
-                        (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
-                         PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
-                        VALUES 
-                        (0, @date, @cCode, @cName, 0, @setAmt, 'Jay Pharma', 'Advance', 0, 0, @totAmt, @mrNo, @details,
-                         @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
-
-                    advCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
-                    advCmd.Parameters.AddWithValue("@cCode", numericCustCode);
-                    advCmd.Parameters.AddWithValue("@cName", r.CustomerName);
-                    advCmd.Parameters.AddWithValue("@setAmt", unallocatedAdvance);
-                    advCmd.Parameters.AddWithValue("@totAmt", r.TotalAmount);
-                    advCmd.Parameters.AddWithValue("@mrNo", mrNo);
-                    advCmd.Parameters.AddWithValue("@details", $"Resync Advance Balance | Collector: {r.CollectorName}");
-
-                    advCmd.Parameters.AddWithValue("@payType", string.IsNullOrWhiteSpace(r.PaymentMethod) ? "CASH" : r.PaymentMethod.Trim());
-                    advCmd.Parameters.AddWithValue("@bank", r.Bank ?? "");
-                    advCmd.Parameters.AddWithValue("@chqBranch", resolvedBranch);
-                    advCmd.Parameters.AddWithValue("@chqNo", r.ChequeNumber ?? "");
-                    advCmd.Parameters.AddWithValue("@chqDate", r.ChequeDate != null ? (object)((DateTime)r.ChequeDate).Date : DBNull.Value);
-                    advCmd.Parameters.AddWithValue("@det1", r.Comments ?? "");
-                    advCmd.Parameters.AddWithValue("@det2", resolvedLocation);
-                    advCmd.Parameters.AddWithValue("@det3", "");
-                    await advCmd.ExecuteNonQueryAsync();
-
-                    using var dpayAdvCmd = erpConn.CreateCommand();
-                    dpayAdvCmd.CommandText = @"
-                        DECLARE @newRNo INT = (SELECT ISNULL(MAX(RNo), 0) + 1 FROM DPay);
-                        INSERT INTO DPay (RNo, Date, InvNo, CCode, Name, Branch, Details, Amount, ShEx, Type, CheNo, PDDate, [Check], Audit, MRNo)
-                        VALUES (@newRNo, @date, 0, @cCode, @cName, 'Jay Pharma', @details, @amount, 0, @type, @cheNo, @pdDate, 'Pending', 'Pending', @mrNo);";
-
-                    dpayAdvCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
-                    dpayAdvCmd.Parameters.AddWithValue("@cCode", numericCustCode);
-                    dpayAdvCmd.Parameters.AddWithValue("@cName", r.CustomerName);
-                    dpayAdvCmd.Parameters.AddWithValue("@details", $"Resync Advance Balance by {r.CollectorName}");
-                    dpayAdvCmd.Parameters.AddWithValue("@amount", unallocatedAdvance);
-                    dpayAdvCmd.Parameters.AddWithValue("@type", r.PaymentMethod.Equals("CHEQUE", StringComparison.OrdinalIgnoreCase) ? "Cheque" : "Cash");
-                    dpayAdvCmd.Parameters.AddWithValue("@cheNo", (object?)r.ChequeNumber ?? "");
-                    dpayAdvCmd.Parameters.AddWithValue("@pdDate", r.ChequeDate != null ? ((DateTime)r.ChequeDate).ToString("dd/MM/yyyy") : "");
-                    dpayAdvCmd.Parameters.AddWithValue("@mrNo", numericReceiptNo);
-                    await dpayAdvCmd.ExecuteNonQueryAsync();
                 }
             }
             else if (r.TotalAmount > 0)
@@ -1462,10 +1410,10 @@ app.MapPost("/api/receipts/resync-to-erp", async () =>
                 appInvCmd.CommandText = @"
                     INSERT INTO dbo.AppInvoice 
                     (InvNo, Date, CCode, CName, InVal, SetAmt, Branch, SettleType, CrPeriod, DOther1, DOther2, Other1, Other2,
-                     PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3)
+                     PayType, Bank, ChequeBranch, ChequeNo, ChequeDate, Details1, Details2, Details3, ExAmount)
                     VALUES 
                     (0, @date, @cCode, @cName, 0, @setAmt, 'Jay Pharma', 'Advance', 0, 0, @totAmt, @mrNo, @details,
-                     @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3);";
+                     @payType, @bank, @chqBranch, @chqNo, @chqDate, @det1, @det2, @det3, 0);";
 
                 appInvCmd.Parameters.AddWithValue("@date", r.CreatedAt.Date);
                 appInvCmd.Parameters.AddWithValue("@cCode", numericCustCode);
@@ -1928,7 +1876,9 @@ record ReceiptInvoiceItemDto(
     DateTime InvoiceDate,
     double InvoiceAmount,
     double AmountSettled,
-    double RemainingBalance
+    double RemainingBalance,
+    double? ExcessAmount = 0.0,
+    double? ExAmount = 0.0
 );
 
 record DayEndFinalizeRequest(

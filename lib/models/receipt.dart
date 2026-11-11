@@ -9,6 +9,7 @@ class ReceiptInvoiceItem {
   final double invoiceAmount;
   final double amountSettled;
   final double remainingBalance;
+  final double excessAmount;
 
   const ReceiptInvoiceItem({
     required this.itemIndex,
@@ -17,6 +18,7 @@ class ReceiptInvoiceItem {
     required this.invoiceAmount,
     required this.amountSettled,
     required this.remainingBalance,
+    this.excessAmount = 0.0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -26,6 +28,8 @@ class ReceiptInvoiceItem {
     'invoiceAmount': invoiceAmount,
     'amountSettled': amountSettled,
     'remainingBalance': remainingBalance,
+    'excessAmount': excessAmount,
+    'exAmount': excessAmount,
   };
 
   factory ReceiptInvoiceItem.fromJson(Map<String, dynamic> json) => ReceiptInvoiceItem(
@@ -35,6 +39,7 @@ class ReceiptInvoiceItem {
     invoiceAmount: (json['invoiceAmount'] as num).toDouble(),
     amountSettled: (json['amountSettled'] as num).toDouble(),
     remainingBalance: (json['remainingBalance'] as num).toDouble(),
+    excessAmount: ((json['excessAmount'] ?? json['exAmount'] ?? 0.0) as num).toDouble(),
   );
 }
 

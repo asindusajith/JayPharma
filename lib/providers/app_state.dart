@@ -1118,8 +1118,13 @@ class AppState extends ChangeNotifier {
     // Prepare allocated invoice items
     final selectedInvoices = draftInvoices.where((i) => i.isSelected && i.allocatedAmount > 0).toList();
     final items = <ReceiptInvoiceItem>[];
+    final totalAllocated = selectedInvoices.fold<double>(0.0, (sum, i) => sum + i.allocatedAmount);
+    final overallExcess = (draftPaymentAmount - totalAllocated) > 0.01 ? (draftPaymentAmount - totalAllocated) : 0.0;
+
     for (int i = 0; i < selectedInvoices.length; i++) {
       final inv = selectedInvoices[i];
+      // Allocate the excess amount to the last selected invoice (or single invoice)
+      final double invExcess = (i == selectedInvoices.length - 1 && overallExcess > 0.01) ? overallExcess : 0.0;
       items.add(ReceiptInvoiceItem(
         itemIndex: i + 1,
         invoiceNo: inv.invoiceNo,
@@ -1127,6 +1132,7 @@ class AppState extends ChangeNotifier {
         invoiceAmount: inv.totalAmount,
         amountSettled: inv.allocatedAmount,
         remainingBalance: (inv.outstandingBalance - inv.allocatedAmount).clamp(0.0, double.infinity),
+        excessAmount: invExcess,
       ));
 
       // Update actual outstanding balance in master data
@@ -1199,6 +1205,8 @@ class AppState extends ChangeNotifier {
           'invoiceAmount': i.invoiceAmount,
           'amountSettled': i.amountSettled,
           'remainingBalance': i.remainingBalance,
+          'excessAmount': i.excessAmount,
+          'exAmount': i.excessAmount,
         }).toList(),
       };
 

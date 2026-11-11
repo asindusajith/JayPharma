@@ -216,36 +216,6 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                               ],
                             ),
                           ),
-                        if (selectedInvoices.isNotEmpty && appState.remainingPaymentAmount > 0.01) ...[
-                          const SizedBox(height: 10),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEFF6FF),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0xFFBFDBFE)),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.account_balance_wallet_outlined, size: 16, color: Color(0xFF1D4ED8)),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      lang == 'si' ? 'ඉතිරි අත්තිකාරම් මුදල:' : 'Remaining Advance:',
-                                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF1E40AF)),
-                                    ),
-                                  ],
-                                ),
-                                Text(
-                                  'Rs. ${currency.format(appState.remainingPaymentAmount)}',
-                                  style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.bold, color: const Color(0xFF1D4ED8)),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
                         ],
                         const SizedBox(height: 14),
                         const Divider(),
@@ -301,83 +271,115 @@ class _PreviewPaymentScreenState extends State<PreviewPaymentScreen> {
                             ),
                           )
                         else
-                          Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(color: const Color(0xFFE2E8F0)),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Table(
-                              border: TableBorder.symmetric(
-                                inside: const BorderSide(color: Color(0xFFF1F5F9), width: 1),
+                          Builder(builder: (context) {
+                            final bool hasExcess = appState.remainingPaymentAmount > 0.01;
+                            return Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                              children: [
-                                TableRow(
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFF8FAFC),
-                                    borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
-                                  ),
-                                  children: [
-                                    _buildTableHeaderCell(LocalizationService.tr('inv_no', lang: lang)),
-                                    _buildTableHeaderCell(LocalizationService.tr('balance', lang: lang), align: TextAlign.right),
-                                    _buildTableHeaderCell(LocalizationService.tr('allocated', lang: lang), align: TextAlign.right),
-                                  ],
+                              child: Table(
+                                border: TableBorder.symmetric(
+                                  inside: const BorderSide(color: Color(0xFFF1F5F9), width: 1),
                                 ),
-                                for (final inv in selectedInvoices)
+                                children: [
                                   TableRow(
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFF8FAFC),
+                                      borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+                                    ),
                                     children: [
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                        child: Text(
-                                          inv.invoiceNo,
-                                          style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                        child: Text(
-                                          currency.format(inv.outstandingBalance),
-                                          textAlign: TextAlign.right,
-                                          style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
-                                        ),
-                                      ),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                        child: Text(
-                                          currency.format(inv.allocatedAmount),
-                                          textAlign: TextAlign.right,
-                                          style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.successGreen),
-                                        ),
-                                      ),
+                                      _buildTableHeaderCell(LocalizationService.tr('inv_no', lang: lang)),
+                                      _buildTableHeaderCell(LocalizationService.tr('balance', lang: lang), align: TextAlign.right),
+                                      _buildTableHeaderCell(LocalizationService.tr('allocated', lang: lang), align: TextAlign.right),
+                                      if (hasExcess)
+                                        _buildTableHeaderCell('ExAmount', align: TextAlign.right),
                                     ],
                                   ),
-                              ],
-                            ),
-                          ),
+                                  for (int idx = 0; idx < selectedInvoices.length; idx++)
+                                    TableRow(
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                          child: Text(
+                                            selectedInvoices[idx].invoiceNo,
+                                            style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                          child: Text(
+                                            currency.format(selectedInvoices[idx].outstandingBalance),
+                                            textAlign: TextAlign.right,
+                                            style: GoogleFonts.inter(fontSize: 11.5, color: AppTheme.textMuted),
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                          child: Text(
+                                            currency.format(selectedInvoices[idx].allocatedAmount),
+                                            textAlign: TextAlign.right,
+                                            style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.successGreen),
+                                          ),
+                                        ),
+                                        if (hasExcess)
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                            child: Text(
+                                              idx == selectedInvoices.length - 1
+                                                  ? currency.format(appState.remainingPaymentAmount)
+                                                  : '0.00',
+                                              textAlign: TextAlign.right,
+                                              style: GoogleFonts.inter(
+                                                fontSize: 11.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: idx == selectedInvoices.length - 1 ? const Color(0xFF15803D) : AppTheme.textMuted,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                ],
+                              ),
+                            );
+                          }),
                         if (selectedInvoices.isNotEmpty && appState.remainingPaymentAmount > 0.01) ...[
                           const SizedBox(height: 10),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFEFF6FF),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0xFFBFDBFE)),
+                              color: const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF86EFAC)),
                             ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    const Icon(Icons.account_balance_wallet_outlined, size: 16, color: Color(0xFF1D4ED8)),
-                                    const SizedBox(width: 6),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.add_chart_rounded, size: 18, color: Color(0xFF15803D)),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          lang == 'si' ? 'අතිරික්ත මුදල (ExAmount):' : 'Excess Amount (ExAmount):',
+                                          style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.bold, color: const Color(0xFF166534)),
+                                        ),
+                                      ],
+                                    ),
                                     Text(
-                                      lang == 'si' ? 'ඉතිරි අත්තිකාරම් මුදල:' : 'Remaining Advance:',
-                                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF1E40AF)),
+                                      'Rs. ${currency.format(appState.remainingPaymentAmount)}',
+                                      style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: const Color(0xFF15803D)),
                                     ),
                                   ],
                                 ),
+                                const SizedBox(height: 4),
                                 Text(
-                                  'Rs. ${currency.format(appState.remainingPaymentAmount)}',
-                                  style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.bold, color: const Color(0xFF1D4ED8)),
+                                  lang == 'si'
+                                      ? 'මෙම මුදල #${selectedInvoices.last.invoiceNo} බිල්පතේ ExAmount තීරුවට සෘජුවම එකතු වේ (වෙනම Advance පේළියක් නිර්මාණය නොවේ).'
+                                      : 'Recorded directly into ExAmount column for Inv #${selectedInvoices.last.invoiceNo} (No separate Advance row created).',
+                                  style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF166534)),
                                 ),
                               ],
                             ),

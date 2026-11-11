@@ -250,7 +250,7 @@ class ReceiptPrinterService {
               child: pw.Text('Advance Payment on Account', style: const pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic)),
             ),
           ] else ...[
-            for (final inv in receipt.allocatedInvoices)
+            for (final inv in receipt.allocatedInvoices) ...[
               pw.Padding(
                 padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
                 child: pw.Row(
@@ -263,6 +263,15 @@ class ReceiptPrinterService {
                   ],
                 ),
               ),
+              if (inv.excessAmount > 0.01)
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(left: 14, bottom: 2),
+                  child: pw.Text(
+                    '↳ ExAmount (Excess): Rs. ${currencyFormat.format(inv.excessAmount)}',
+                    style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold, color: PdfColors.green800),
+                  ),
+                ),
+            ],
           ],
 
           pw.Divider(thickness: 0.8),

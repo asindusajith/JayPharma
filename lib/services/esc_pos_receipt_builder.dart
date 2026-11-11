@@ -177,13 +177,17 @@ class EscPosReceiptBuilder {
           PosColumn(text: currency.format(inv.invoiceAmount), width: 3, styles: const PosStyles(align: PosAlign.right)),
           PosColumn(text: currency.format(inv.amountSettled), width: 3, styles: const PosStyles(align: PosAlign.right)),
         ]);
-      }
-      if (unallocatedAdvance > 0.01) {
-        bytes += generator.row([
-          PosColumn(text: 'Advance Credit', width: 6),
-          PosColumn(text: '0.00', width: 3, styles: const PosStyles(align: PosAlign.right)),
-          PosColumn(text: currency.format(unallocatedAdvance), width: 3, styles: const PosStyles(align: PosAlign.right)),
-        ]);
+        // Excess payment on invoice is designated as ExAmount (no separate Advance row)
+        final excessOnThisInv = inv.excessAmount > 0.01
+            ? inv.excessAmount
+            : ((inv == receipt.allocatedInvoices.last && unallocatedAdvance > 0.01) ? unallocatedAdvance : 0.0);
+        if (excessOnThisInv > 0.01) {
+          bytes += generator.row([
+            PosColumn(text: ' ExAmount (Excess):', width: 6),
+            PosColumn(text: '0.00', width: 3, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(text: currency.format(excessOnThisInv), width: 3, styles: const PosStyles(align: PosAlign.right)),
+          ]);
+        }
       }
     }
     bytes += generator.hr(ch: '-');
