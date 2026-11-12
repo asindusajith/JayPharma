@@ -126,7 +126,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _loadBluetoothPrinters({bool requestPerm = false}) async {
+  Future<void> _loadBluetoothPrinters({bool requestPerm = true}) async {
     setState(() => _isScanningPrinters = true);
     try {
       final isBtOn = await BluetoothPrinterService.isBluetoothEnabled();
@@ -191,6 +191,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final success = await BluetoothPrinterService.connect(device.address, printerName: device.name);
       final isConn = success || await BluetoothPrinterService.isConnected();
       if (mounted) {
+        setState(() {
+          _selectedPrinterDevice = device.copyWith(isConnected: isConn);
+          final idx = _pairedPrinters.indexWhere((p) => p.address == device.address);
+          if (idx >= 0) {
+            _pairedPrinters[idx] = _pairedPrinters[idx].copyWith(isConnected: isConn);
+          }
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -203,10 +210,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : 'Connection failed. Please ensure the printer is turned ON and nearby.'),
             ),
             backgroundColor: isConn ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+            duration: const Duration(seconds: 3),
           ),
         );
       }
-      await _loadBluetoothPrinters();
+      await _loadBluetoothPrinters(requestPerm: false);
     } finally {
       if (mounted) setState(() => _isConnectingPrinter = false);
     }
@@ -215,13 +223,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _disconnectPrinter(String lang) async {
     await BluetoothPrinterService.disconnect();
     if (mounted) {
+      setState(() {
+        if (_selectedPrinterDevice != null) {
+          _selectedPrinterDevice = _selectedPrinterDevice!.copyWith(isConnected: false);
+        }
+        for (int i = 0; i < _pairedPrinters.length; i++) {
+          _pairedPrinters[i] = _pairedPrinters[i].copyWith(isConnected: false);
+        }
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(lang == 'si' ? 'මුද්‍රණ යන්ත්‍රය විසන්ධි කරන ලදී.' : 'Printer disconnected.'),
         ),
       );
     }
-    await _loadBluetoothPrinters();
+    await _loadBluetoothPrinters(requestPerm: false);
   }
 
   Future<void> _runTestPrint(String lang) async {
@@ -1018,7 +1034,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                                   ),
                                   Text(
-                                    'Installed: v1.0.4 (Build 5) • Direct Bluetooth ESC/POS',
+                                    'Installed: v1.0.5 (Build 6) • Direct Bluetooth ESC/POS',
                                     style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
                                   ),
                                 ],
@@ -1029,8 +1045,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 12),
                         Text(
                           lang == 'si'
-                              ? 'Git push කළ පසු නවතම APK එක GitHub මඟින් ස්වයංක්‍රීයව Build වේ. පහත බටනය මඟින් නවතම APK එක (JayPharma-v1.0.4-release.apk) ඕනෑම වේලාවක බාගත කර ස්ථාපනය කළ හැක.'
-                              : 'Whenever code is pushed to GitHub, the latest release APK is automatically compiled in the cloud. Tap below to download the latest JayPharma-v1.0.4-release.apk.',
+                              ? 'Git push කළ පසු නවතම APK එක GitHub මඟින් ස්වයංක්‍රීයව Build වේ. පහත බටනය මඟින් නවතම APK එක (JayPharma-v1.0.5-release.apk) ඕනෑම වේලාවක බාගත කර ස්ථාපනය කළ හැක.'
+                              : 'Whenever code is pushed to GitHub, the latest release APK is automatically compiled in the cloud. Tap below to download the latest JayPharma-v1.0.5-release.apk.',
                           style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textDark, height: 1.4),
                         ),
                         const SizedBox(height: 12),
@@ -1039,7 +1055,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: ElevatedButton.icon(
                             icon: const Icon(Icons.download_rounded, size: 18),
                             label: Text(
-                              lang == 'si' ? 'නවතම APK එක බාගත කරන්න (v1.0.4 Build 5)' : 'Download Latest APK (v1.0.4 Build 5)',
+                              lang == 'si' ? 'නවතම APK එක බාගත කරන්න (v1.0.5 Build 6)' : 'Download Latest APK (v1.0.5 Build 6)',
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                             ),
                             style: ElevatedButton.styleFrom(
@@ -1049,7 +1065,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             onPressed: () async {
-                              final githubUrl = 'https://github.com/asindusajith/JayPharma/releases/download/latest/JayPharma-v1.0.4-release.apk';
+                              final githubUrl = 'https://github.com/asindusajith/JayPharma/releases/download/latest/JayPharma-v1.0.5-release.apk';
                               final fallbackGithubUrl = 'https://github.com/asindusajith/JayPharma/releases/download/latest/app-release.apk';
                               final localWifiUrl = 'http://192.168.1.18:8090/JayPharma-release.apk';
                               final serverApkUrl = '${appState.apiBaseUrl}/app/download-apk';

@@ -36,34 +36,35 @@ jobs:
       - name: Build Release APK
         run: |
           flutter build apk --release
-          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/JayPharma-v1.0.4-release.apk
+          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/JayPharma-v1.0.5-release.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: build/app/outputs/flutter-apk/JayPharma-v1.0.4-release.apk
+          path: build/app/outputs/flutter-apk/JayPharma-v1.0.5-release.apk
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         if: success()
         with:
           tag_name: latest
-          name: "JayPharma v1.0.4 (Build 5) - Direct Bluetooth Thermal Release"
+          name: "JayPharma v1.0.5 (Build 6) - Direct Thermal POS Auto-Connect & Dropdown Fix"
           body: |
-            ### JayPharma Mobile Application - v1.0.4 (Build 5)
-            - Direct Bluetooth thermal ESC/POS printing (PrintBluetoothThermal clean engine)
-            - Proactive auto-connect and persistence for MTP-3_5F22 printer across app restarts
-            - System PDF print spooler completely bypassed on Android POS
+            ### JayPharma Mobile Application - v1.0.5 (Build 6)
+            - Direct RFCOMM Channel 1 Bluetooth thermal printer connection engine
+            - Auto-detects bonded printer and keeps it permanently in the dropdown & settings
+            - Seamless auto-connect on app startup and automatic re-connect on print
+            - Completely bypasses external printer apps and Android print dialogs on POS
             - Support for Copy Tabs: All (2 Copies), Customer Copy Only, Accounts Copy Only
-            - Cleaned receipt header spacing and expanded Customer Signature area
+            - Automatic runtime Bluetooth permissions request on Android 12+
             - Automated cloud build generated from commit `${{ github.sha }}`
             
             **Direct Download Links**:
-            - [Download JayPharma-v1.0.4-release.apk](https://github.com/${{ github.repository }}/releases/download/latest/JayPharma-v1.0.4-release.apk)
+            - [Download JayPharma-v1.0.5-release.apk](https://github.com/${{ github.repository }}/releases/download/latest/JayPharma-v1.0.5-release.apk)
             - [Download app-release.apk](https://github.com/${{ github.repository }}/releases/download/latest/app-release.apk)
           files: |
-            build/app/outputs/flutter-apk/JayPharma-v1.0.4-release.apk
+            build/app/outputs/flutter-apk/JayPharma-v1.0.5-release.apk
             build/app/outputs/flutter-apk/app-release.apk
           make_latest: true
         env:

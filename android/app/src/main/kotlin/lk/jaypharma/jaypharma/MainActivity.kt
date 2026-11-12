@@ -4,6 +4,9 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
+import java.io.OutputStream
+import java.util.UUID
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -24,6 +27,11 @@ class MainActivity : FlutterActivity() {
     private val PREFS_NAME = "JayPharmaKiosk"
     private val KEY_KIOSK = "kiosk_enabled"
     private val BT_PERMISSION_REQ_CODE = 4101
+
+    // Persistent RFCOMM Bluetooth POS Socket Cache
+    private var printerSocket: BluetoothSocket? = null
+    private var printerOutputStream: OutputStream? = null
+    private var connectedAddress: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -83,6 +91,9 @@ class MainActivity : FlutterActivity() {
                 "getBondedDevices" -> {
                     val list = mutableListOf<Map<String, String>>()
                     try {
+                        if (!checkBtPermissions()) {
+                            requestBtPermissions()
+                        }
                         val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
                         val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
                         adapter?.bondedDevices?.forEach { dev ->
@@ -92,10 +103,17 @@ class MainActivity : FlutterActivity() {
                             } catch (_: Exception) {
                                 "Bluetooth Device"
                             }
-                            list.add(mapOf(
-                                "name" to devName,
-                                "address" to dev.address
-                            ))
+                            val devAddr = try {
+                                dev.address ?: ""
+                            } catch (_: Exception) {
+                                ""
+                            }
+                            if (devAddr.isNotBlank()) {
+                                list.add(mapOf(
+                                    "name" to devName,
+                                    "address" to devAddr
+                                ))
+                            }
                         }
                     } catch (e: Exception) {
                         android.util.Log.w("JayPharmaBT", "getBondedDevices error: ${e.message}")
@@ -240,6 +258,187 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "isPrinterConnected" -> {
+                    val isConn = printerSocket?.isConnected == true && printerOutputStream != null
+                    result.success(isConn)
+                }
+                "connectPrinter" -> {
+                    val addr = call.argument<String>("address")
+                    Thread {
+                        var success = false
+                        try {
+                            val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                            val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                            if (adapter != null && adapter.isEnabled) {
+                                var targetAddress = addr
+                                if (targetAddress.isNullOrBlank()) {
+                                    val bonded = adapter.bondedDevices
+                                    val printer = bonded?.firstOrNull { dev ->
+                                        val n = (dev.name ?: "").uppercase()
+                                        n.contains("MTP") || n.contains("POS") || n.contains("RPP") || n.contains("PRINT") || n.contains("THERMAL")
+                                    } ?: bonded?.firstOrNull()
+                                    targetAddress = printer?.address
+                                }
+
+                                if (!targetAddress.isNullOrBlank()) {
+                                    if (printerSocket?.isConnected == true && connectedAddress == targetAddress && printerOutputStream != null) {
+                                        runOnUiThread { result.success(true) }
+                                        return@Thread
+                                    }
+
+                                    try { printerOutputStream?.close() } catch (_: Exception) {}
+                                    try { printerSocket?.close() } catch (_: Exception) {}
+                                    printerSocket = null
+                                    printerOutputStream = null
+                                    connectedAddress = null
+
+                                    val device = adapter.getRemoteDevice(targetAddress)
+                                    try { adapter.cancelDiscovery() } catch (_: Exception) {}
+
+                                    var socket: BluetoothSocket? = null
+                                    // Stage 1: Standard SPP UUID
+                                    try {
+                                        val sppUuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+                                        socket = device.createRfcommSocketToServiceRecord(sppUuid)
+                                        socket.connect()
+                                    } catch (_: Exception) {
+                                        socket = null
+                                    }
+
+                                    // Stage 2: Direct Channel 1 Reflection (Universal for portable ESC/POS thermal printers)
+                                    if (socket == null || !socket.isConnected) {
+                                        try {
+                                            val m = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                                            socket = m.invoke(device, 1) as BluetoothSocket
+                                            socket.connect()
+                                        } catch (_: Exception) {
+                                            socket = null
+                                        }
+                                    }
+
+                                    if (socket != null && socket.isConnected) {
+                                        printerSocket = socket
+                                        printerOutputStream = socket.outputStream
+                                        connectedAddress = targetAddress
+                                        success = true
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("JayPharmaBT", "connectPrinter error: ${e.message}")
+                            success = false
+                        }
+                        runOnUiThread { result.success(success) }
+                    }.start()
+                }
+                "disconnectPrinter" -> {
+                    try {
+                        printerOutputStream?.close()
+                        printerSocket?.close()
+                    } catch (_: Exception) {}
+                    printerSocket = null
+                    printerOutputStream = null
+                    connectedAddress = null
+                    result.success(true)
+                }
+                "printRawBytes" -> {
+                    val addr = call.argument<String>("address")
+                    val rawBytes = call.argument<ByteArray>("bytes")
+                    if (rawBytes == null || rawBytes.isEmpty()) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+
+                    Thread {
+                        var success = false
+                        try {
+                            val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                            val adapter = bm?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+                            if (adapter == null || !adapter.isEnabled) {
+                                runOnUiThread { result.success(false) }
+                                return@Thread
+                            }
+
+                            var targetAddress = addr
+                            if (targetAddress.isNullOrBlank()) {
+                                val bonded = adapter.bondedDevices
+                                val printer = bonded?.firstOrNull { dev ->
+                                    val n = (dev.name ?: "").uppercase()
+                                    n.contains("MTP") || n.contains("POS") || n.contains("RPP") || n.contains("PRINT") || n.contains("THERMAL")
+                                } ?: bonded?.firstOrNull()
+                                targetAddress = printer?.address
+                            }
+
+                            if (targetAddress.isNullOrBlank()) {
+                                runOnUiThread { result.success(false) }
+                                return@Thread
+                            }
+
+                            // 1. If existing socket is open to target address, write directly
+                            if (printerSocket?.isConnected == true && printerOutputStream != null && connectedAddress == targetAddress) {
+                                try {
+                                    printerOutputStream?.write(rawBytes)
+                                    printerOutputStream?.flush()
+                                    success = true
+                                } catch (e: Exception) {
+                                    try { printerOutputStream?.close() } catch (_: Exception) {}
+                                    try { printerSocket?.close() } catch (_: Exception) {}
+                                    printerSocket = null
+                                    printerOutputStream = null
+                                    connectedAddress = null
+                                }
+                            }
+
+                            // 2. Open new RFCOMM connection if not already written
+                            if (!success) {
+                                val device = adapter.getRemoteDevice(targetAddress)
+                                try { adapter.cancelDiscovery() } catch (_: Exception) {}
+
+                                var socket: BluetoothSocket? = null
+                                // Attempt 1: Standard SPP UUID
+                                try {
+                                    val sppUuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+                                    socket = device.createRfcommSocketToServiceRecord(sppUuid)
+                                    socket.connect()
+                                } catch (e1: Exception) {
+                                    socket = null
+                                }
+
+                                // Attempt 2: Channel 1 Reflection (Universal for portable Chinese POS/MTP thermal printers)
+                                if (socket == null || !socket.isConnected) {
+                                    try {
+                                        val m = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                                        socket = m.invoke(device, 1) as BluetoothSocket
+                                        socket.connect()
+                                    } catch (e2: Exception) {
+                                        socket = null
+                                    }
+                                }
+
+                                if (socket != null && socket.isConnected) {
+                                    val stream = socket.outputStream
+                                    stream.write(rawBytes)
+                                    stream.flush()
+
+                                    // Cache connection for instant successive prints
+                                    printerSocket = socket
+                                    printerOutputStream = stream
+                                    connectedAddress = targetAddress
+                                    success = true
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("JayPharmaBT", "printRawBytes error: ${e.message}")
+                            try { printerOutputStream?.close() } catch (_: Exception) {}
+                            try { printerSocket?.close() } catch (_: Exception) {}
+                            printerSocket = null
+                            printerOutputStream = null
+                            connectedAddress = null
+                            success = false
+                        }
+                        runOnUiThread { result.success(success) }
+                    }.start()
+                }
                 else -> result.notImplemented()
             }
         }
@@ -247,8 +446,7 @@ class MainActivity : FlutterActivity() {
 
     private fun checkBtPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
         } else {
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED
         }

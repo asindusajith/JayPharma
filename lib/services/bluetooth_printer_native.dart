@@ -25,8 +25,7 @@ class BluetoothPrinterService {
         final bool? nativeHas = await _nativeBtChannel.invokeMethod<bool>('hasBluetoothPermissions');
         if (nativeHas == true) return true;
       }
-      return await PrintBluetoothThermal.isPermissionBluetoothGranted
-          .timeout(const Duration(milliseconds: 600), onTimeout: () => false);
+      return await PrintBluetoothThermal.isPermissionBluetoothGranted;
     } catch (_) {
       return false;
     }
@@ -38,8 +37,7 @@ class BluetoothPrinterService {
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         await _nativeBtChannel.invokeMethod('requestBluetoothPermissions');
       }
-      final granted = await PrintBluetoothThermal.isPermissionBluetoothGranted
-          .timeout(const Duration(milliseconds: 600), onTimeout: () => false);
+      final granted = await PrintBluetoothThermal.isPermissionBluetoothGranted;
       return granted;
     } catch (_) {
       return false;
@@ -111,22 +109,37 @@ class BluetoothPrinterService {
   /// Check if currently connected to a printer
   static Future<bool> isConnected() async {
     try {
-      final status = await PrintBluetoothThermal.connectionStatus
-          .timeout(const Duration(milliseconds: 600), onTimeout: () => false);
-      if (!status) {
-        _connectedDevice = null;
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        final bool? nativeConn = await _nativeBtChannel.invokeMethod<bool>('isPrinterConnected');
+        if (nativeConn == true) {
+          if (_connectedDevice != null) {
+            _connectedDevice = _connectedDevice!.copyWith(isConnected: true);
+          }
+          return true;
+        }
       }
-      return status;
+      final status = await PrintBluetoothThermal.connectionStatus;
+      if (status) {
+        if (_connectedDevice != null) {
+          _connectedDevice = _connectedDevice!.copyWith(isConnected: true);
+        }
+        return true;
+      }
+      _connectedDevice = null;
+      return false;
     } catch (_) {
       return false;
     }
   }
 
   /// Returns list of paired Bluetooth devices on the system
-  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = false, bool scanNearby = false}) async {
+  static Future<List<BluetoothPrinterDevice>> getPairedDevices({bool requestPerm = true, bool scanNearby = false}) async {
     try {
       if (requestPerm) {
-        await requestPermission();
+        final hasPerm = await isPermissionGranted();
+        if (!hasPerm) {
+          await requestPermission();
+        }
       }
 
       final isConn = await isConnected();
@@ -164,18 +177,19 @@ class BluetoothPrinterService {
 
       // 2. Query PrintBluetoothThermal plugin
       try {
-        final list = await PrintBluetoothThermal.pairedBluetooths
-            .timeout(const Duration(milliseconds: 1000), onTimeout: () => []);
+        final list = await PrintBluetoothThermal.pairedBluetooths;
         for (final info in list) {
           final mac = info.macAdress.trim();
-          if (mac.isNotEmpty && !deviceMap.containsKey(mac)) {
+          if (mac.isNotEmpty) {
             final isCur = isConn && (_connectedDevice?.address == mac || savedMac == mac);
             final devName = info.name.trim().isNotEmpty ? info.name.trim() : 'Bluetooth Printer';
-            deviceMap[mac] = BluetoothPrinterDevice(
-              name: devName,
-              address: mac,
-              isConnected: isCur,
-            );
+            if (!deviceMap.containsKey(mac) || deviceMap[mac]!.name == 'Bluetooth Printer') {
+              deviceMap[mac] = BluetoothPrinterDevice(
+                name: devName,
+                address: mac,
+                isConnected: isCur,
+              );
+            }
           }
         }
       } catch (e) {
@@ -238,8 +252,7 @@ class BluetoothPrinterService {
     if (cleanMac.isEmpty) return false;
 
     if (_isConnecting) {
-      // Small wait if a connection is currently in progress
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 300));
       if (await isConnected() && _connectedDevice?.address == cleanMac) {
         return true;
       }
@@ -247,42 +260,50 @@ class BluetoothPrinterService {
 
     _isConnecting = true;
     try {
-      // 1. Always save to SharedPreferences immediately so the app remembers this printer permanently!
+      // 1. Permanently save to SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefKeyMac, cleanMac);
       if (printerName != null && printerName.isNotEmpty) {
         await prefs.setString(_prefKeyName, printerName);
       }
 
-      // 2. Check if already connected to this exact device
+      // 2. Check if already connected
       if (await isConnected() && _connectedDevice?.address == cleanMac) {
         return true;
       }
 
-      // 3. Cancel any running Bluetooth discovery to free RFCOMM bandwidth
+      // 3. Attempt Native Android 2-stage connection (SPP UUID + Channel 1 Reflection)
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         try {
-          await _nativeBtChannel.invokeMethod('cancelDiscovery');
-        } catch (_) {}
+          final bool? nativeSuccess = await _nativeBtChannel.invokeMethod<bool>('connectPrinter', {'address': cleanMac});
+          if (nativeSuccess == true) {
+            _connectedDevice = BluetoothPrinterDevice(
+              name: (printerName != null && printerName.isNotEmpty) ? printerName : 'MTP-3_5F22',
+              address: cleanMac,
+              isConnected: true,
+            );
+            return true;
+          }
+        } catch (e) {
+          if (kDebugMode) print('[NativeConnect] error: $e');
+        }
       }
 
-      // 4. Disconnect any stale socket cleanly
+      // 4. Fallback to PrintBluetoothThermal plugin
       try {
         await PrintBluetoothThermal.disconnect;
-        await Future.delayed(const Duration(milliseconds: 250));
-      } catch (_) {}
-
-      // 5. Connect using PrintBluetoothThermal with robust 8-second timeout
-      final success = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac)
-          .timeout(const Duration(seconds: 8), onTimeout: () => false);
-
-      if (success || await PrintBluetoothThermal.connectionStatus) {
-        _connectedDevice = BluetoothPrinterDevice(
-          name: (printerName != null && printerName.isNotEmpty) ? printerName : 'MTP-3_5F22',
-          address: cleanMac,
-          isConnected: true,
-        );
-        return true;
+        await Future.delayed(const Duration(milliseconds: 200));
+        final pluginSuccess = await PrintBluetoothThermal.connect(macPrinterAddress: cleanMac);
+        if (pluginSuccess || await PrintBluetoothThermal.connectionStatus) {
+          _connectedDevice = BluetoothPrinterDevice(
+            name: (printerName != null && printerName.isNotEmpty) ? printerName : 'MTP-3_5F22',
+            address: cleanMac,
+            isConnected: true,
+          );
+          return true;
+        }
+      } catch (e) {
+        if (kDebugMode) print('[PluginConnect] error: $e');
       }
 
       return false;
@@ -297,6 +318,11 @@ class BluetoothPrinterService {
   /// Disconnects from current printer
   static Future<bool> disconnect() async {
     try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        try {
+          await _nativeBtChannel.invokeMethod('disconnectPrinter');
+        } catch (_) {}
+      }
       await PrintBluetoothThermal.disconnect;
       _connectedDevice = null;
       return true;
@@ -309,30 +335,43 @@ class BluetoothPrinterService {
   /// Sends raw ESC/POS bytes directly to the Bluetooth printer (Auto-connects if needed)
   static Future<bool> printBytes(List<int> bytes) async {
     try {
-      bool connected = await isConnected();
+      final savedPrinter = await getSavedPrinter();
+      final targetMac = savedPrinter?.address ?? '';
+      final targetName = savedPrinter?.name ?? 'MTP-3_5F22';
 
-      // If not currently connected, auto-connect to the saved or bonded printer first
-      if (!connected) {
-        final savedPrinter = await getSavedPrinter();
-        final targetMac = savedPrinter?.address ?? '';
-        final targetName = savedPrinter?.name ?? 'MTP-3_5F22';
-
-        if (targetMac.isNotEmpty) {
-          final ok = await connect(targetMac, printerName: targetName);
-          if (ok) {
-            connected = true;
+      // 1. Direct Native Android RFCOMM print (Fastest, direct socket with Channel 1 fallback)
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        try {
+          final bool? nativeSuccess = await _nativeBtChannel.invokeMethod<bool>('printRawBytes', {
+            'address': targetMac,
+            'bytes': Uint8List.fromList(bytes),
+          });
+          if (nativeSuccess == true) {
+            _connectedDevice = BluetoothPrinterDevice(
+              name: targetName,
+              address: targetMac,
+              isConnected: true,
+            );
+            return true;
           }
+        } catch (e) {
+          if (kDebugMode) print('[NativePrint] error: $e');
         }
       }
 
-      // If still not connected, return false so caller can notify user
-      if (!connected) {
-        return false;
+      // 2. Secondary fallback via PrintBluetoothThermal plugin
+      bool connected = await isConnected();
+      if (!connected && targetMac.isNotEmpty) {
+        final ok = await connect(targetMac, printerName: targetName);
+        if (ok) connected = true;
       }
 
-      // Send ESC/POS bytes directly to the thermal printer
-      final success = await PrintBluetoothThermal.writeBytes(bytes);
-      return success;
+      if (connected) {
+        final success = await PrintBluetoothThermal.writeBytes(bytes);
+        return success;
+      }
+
+      return false;
     } catch (e) {
       if (kDebugMode) print('printBytes error: $e');
       return false;
@@ -372,7 +411,6 @@ class BluetoothPrinterService {
       try {
         final List<dynamic>? bonded = await _nativeBtChannel.invokeMethod<List<dynamic>>('getBondedDevices');
         if (bonded != null && bonded.isNotEmpty) {
-          // Find printer by common thermal printer name keywords or take the first bonded device
           dynamic printerDev = bonded.firstWhere(
             (d) {
               if (d is! Map) return false;
