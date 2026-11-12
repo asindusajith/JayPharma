@@ -35,7 +35,7 @@ jobs:
 
       - name: Build Release APK
         run: |
-          flutter build apk --release
+          flutter build apk --release || { echo "Build failed, retrying with verbose to capture log:"; flutter build apk --release -v; exit 1; }
           cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/JayPharma-v1.0.5-release.apk
 
       - name: Upload APK Artifact
